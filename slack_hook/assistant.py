@@ -4,7 +4,7 @@ from slack_bolt import Assistant, BoltContext, Say, SetSuggestedPrompts, SetStat
 from slack_bolt.context.get_thread_context import GetThreadContext
 from slack_sdk import WebClient
 
-from .llm_caller import LLMCaller
+from .llm import LLMCaller
 
 # Refer to https://tools.slack.dev/bolt-python/concepts/assistant/ for more details
 assistant = Assistant()
@@ -37,6 +37,16 @@ def respond_in_assistant_thread(
     client: WebClient,
     say: Say,
 ):
+    if context.channel_id is None:
+        logger.error("Channel ID is None. Cannot fetch thread replies.")
+        say(":warning: Something went wrong! (Channel ID is missing)")
+        return
+
+    if context.thread_ts is None:
+        logger.error("Thread timestamp (thread_ts) is None. Cannot fetch thread replies.")
+        say(":warning: Something went wrong! (Thread timestamp is missing)")
+        return
+
     replies = client.conversations_replies(
         channel=context.channel_id,
         ts=context.thread_ts,
@@ -44,9 +54,11 @@ def respond_in_assistant_thread(
         limit=10,
     )
     messages_in_thread: List[Dict[str, str]] = []
-    for message in replies["messages"]:
-        role = "user" if message.get("bot_id") is None else "assistant"
-        messages_in_thread.append({"role": role, "content": message["text"]})
+    messages = replies.get("messages")
+    if messages is not None:
+        for message in messages:
+            role = "user" if message.get("bot_id") is None else "assistant"
+            messages_in_thread.append({"role": role, "content": message["text"]})
     try:
         returned_message = llm_caller.call_llm(set_status, messages_in_thread)
         say(returned_message)

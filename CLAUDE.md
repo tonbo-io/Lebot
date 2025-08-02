@@ -83,7 +83,7 @@ LINEAR_API_KEY=<your-linear-api-key>  # Optional: for Linear integration
 source .venv/bin/activate
 
 # Linting
-flake8 *.py && flake8 listeners/
+flake8 *.py
 
 # Code formatting
 black .

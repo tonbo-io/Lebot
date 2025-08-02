@@ -1,12 +1,10 @@
 import os
 import re
-from typing import List, Dict
+from typing import List, Dict, Optional
 
 from anthropic import Anthropic
-from dotenv import load_dotenv
+from anthropic.types import TextBlock
 from slack_bolt import SetStatus
-
-load_dotenv()
 
 
 class LLMCaller:
@@ -18,7 +16,7 @@ When you include markdown text, convert them to Slack compatible ones.
 When a prompt has Slack's special syntax like <@USER_ID> or <#CHANNEL_ID>, you must keep them as-is in your response.
 """
 
-    def __init__(self, api_key: str = None):
+    def __init__(self, api_key: Optional[str] = None):
         if api_key is None:
             api_key = os.getenv("ANTHROPIC_API_KEY")
         if not api_key:
@@ -29,7 +27,7 @@ When a prompt has Slack's special syntax like <@USER_ID> or <#CHANNEL_ID>, you m
         self,
         set_status: SetStatus,
         messages_in_thread: List[Dict[str, str]],
-        system_content: str = None,
+        system_content: Optional[str] = None,
     ) -> str:
         if system_content is None:
             system_content = self.DEFAULT_SYSTEM_CONTENT
@@ -45,7 +43,12 @@ When a prompt has Slack's special syntax like <@USER_ID> or <#CHANNEL_ID>, you m
 
         if len(response.content) < 1:
             return "I'm distracted."
-        return LLMCaller.markdown_to_slack(response.content[0].text)
+
+        content = response.content[0]
+        if isinstance(content, TextBlock):
+            return LLMCaller.markdown_to_slack(content.text)
+
+        return "I'm not sure how to respond to that."
 
     @staticmethod
     def markdown_to_slack(content: str) -> str:
