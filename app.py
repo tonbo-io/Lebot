@@ -1,17 +1,21 @@
 import os
 import logging
+from dotenv import load_dotenv
 
 from slack_bolt import App
 from slack_bolt.adapter.socket_mode import SocketModeHandler
 
-from listeners import register_listeners
+from slack_hook import register
+
+# Load environment variables
+load_dotenv()
 
 # Initialization
 logging.basicConfig(level=logging.DEBUG)
 app = App(token=os.environ.get("SLACK_BOT_TOKEN"))
 
 # Register Listeners
-register_listeners(app)
+register(app)
 
 # Start Bolt app
 if __name__ == "__main__":

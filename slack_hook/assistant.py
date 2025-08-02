@@ -37,20 +37,19 @@ def respond_in_assistant_thread(
     client: WebClient,
     say: Say,
 ):
+    replies = client.conversations_replies(
+        channel=context.channel_id,
+        ts=context.thread_ts,
+        oldest=context.thread_ts,
+        limit=10,
+    )
+    messages_in_thread: List[Dict[str, str]] = []
+    for message in replies["messages"]:
+        role = "user" if message.get("bot_id") is None else "assistant"
+        messages_in_thread.append({"role": role, "content": message["text"]})
     try:
-        replies = client.conversations_replies(
-            channel=context.channel_id,
-            ts=context.thread_ts,
-            oldest=context.thread_ts,
-            limit=10,
-        )
-        messages_in_thread: List[Dict[str, str]] = []
-        for message in replies["messages"]:
-            role = "user" if message.get("bot_id") is None else "assistant"
-            messages_in_thread.append({"role": role, "content": message["text"]})
         returned_message = llm_caller.call_llm(set_status, messages_in_thread)
         say(returned_message)
-
     except Exception as e:
         logger.exception(f"Failed to handle a user message event: {e}")
         say(f":warning: Something went wrong! ({e})")

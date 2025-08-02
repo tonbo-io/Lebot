@@ -4,7 +4,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a Slack bot application called "lebot" built with Slack Bolt for Python that implements Slack's Agents & Assistants API. The bot provides an AI assistant experience using Anthropic's Claude API to respond to user messages in Slack threads.
+This is a **Generic AI Agent Platform** called "lebot" that enables Claude Code to work as an AI agent through Slack, with dynamic tool creation and usage capabilities. The platform consists of:
+
+1. **Core AI Agent**: Generic agent that can use and create tools dynamically
+2. **Slack Interface**: User interaction layer via Slack bot
+3. **Modular Tools**: Extensible tool ecosystem (Linear API, GitHub, databases, custom tools)
+
+The architecture follows the pattern: **User ↔ Slack ↔ AI Agent ↔ Tools**
 
 ## Key Architecture Components
 
@@ -19,12 +25,25 @@ This is a Slack bot application called "lebot" built with Slack Bolt for Python 
 - The class encapsulates API client initialization, message processing, and markdown-to-Slack formatting conversion
 - Uses Claude Sonnet 4 model by default with configurable system prompts
 
+### GraphQL Client
+- **`graphql_client.py`**: Simple GraphQL client module for HTTP requests to GraphQL endpoints
+- **`GraphQLClient`**: Generic GraphQL client that uses requests library with JSON format support
+- **`LinearClient`**: Specialized client for Linear API with pre-configured endpoints and helper methods
+- Supports query variables, error handling, and authentication
+- Used for integrating with Linear's project management data
+
 ### Assistant Implementation Pattern
 The codebase provides two approaches:
 1. **Assistant Middleware** (recommended): Uses `@assistant.thread_started` and `@assistant.user_message` decorators
 2. **Event Listeners** (educational): Manual event handling for `assistant_thread_started`, `assistant_thread_context_changed`, and `message` events
 
 ## Development Commands
+
+### IMPORTANT: Always Activate Virtual Environment First
+```bash
+# ALWAYS activate the virtual environment before running any Python commands
+source .venv/bin/activate  # On Windows: .\.venv\Scripts\Activate
+```
 
 ### Setup and Installation
 ```bash
@@ -38,6 +57,9 @@ pip install -r requirements.txt
 
 ### Running the Application
 ```bash
+# ALWAYS activate virtual environment first
+source .venv/bin/activate
+
 # Start the bot (requires environment variables set)
 python3 app.py
 ```
@@ -52,10 +74,14 @@ cp .env.example .env
 SLACK_BOT_TOKEN=<your-bot-token>
 SLACK_APP_TOKEN=<your-app-token>
 ANTHROPIC_API_KEY=<your-anthropic-api-key>
+LINEAR_API_KEY=<your-linear-api-key>  # Optional: for Linear integration
 ```
 
 ### Code Quality Commands
 ```bash
+# ALWAYS activate virtual environment first
+source .venv/bin/activate
+
 # Linting
 flake8 *.py && flake8 listeners/
 
@@ -85,8 +111,44 @@ pytest
 - Black line length: 125 characters (configured in `pyproject.toml`)
 - Pytest configuration includes debug logging to `logs/pytest.log`
 
+## GraphQL Client Usage
+
+### Basic Usage
+```python
+from graphql_client import LinearClient
+
+# Initialize with Linear API key
+linear = LinearClient('your_linear_api_key')
+
+# Test connection
+result = linear.test_connection()
+
+# Get all issues
+issues = linear.get_issues()
+
+# Get issues for specific team
+team_issues = linear.get_issues(team_id='team_uuid')
+
+# Get teams
+teams = linear.get_teams()
+
+# Create new issue
+new_issue = linear.create_issue(
+    team_id='team_uuid',
+    title='New issue',
+    description='Description here',
+    priority=2
+)
+```
+
+### Important Notes
+- Linear API keys should NOT include "Bearer" prefix in Authorization header
+- Use team IDs (UUIDs) for filtering, not team keys
+- The client handles JSON format HTTP queries and GraphQL variables automatically
+
 ## Security Considerations
 
 - API keys are loaded from environment variables using python-dotenv for secure configuration
 - Create a `.env` file (not committed to version control) with your actual API keys
 - The `.env.example` file shows the required environment variables without exposing sensitive data
+- Linear API keys should be stored securely and not committed to version control

@@ -45,9 +45,10 @@ When a prompt has Slack's special syntax like <@USER_ID> or <#CHANNEL_ID>, you m
 
         if len(response.content) < 1:
             return "I'm distracted."
-        return self.markdown_to_slack(response.content[0].text)
+        return LLMCaller.markdown_to_slack(response.content[0].text)
 
-    def markdown_to_slack(self, content: str) -> str:
+    @staticmethod
+    def markdown_to_slack(content: str) -> str:
         # Split the input string into parts based on code blocks and inline code
         parts = re.split(r"(?s)(```.+?```|`[^`\n]+?`)", content)
 
