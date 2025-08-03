@@ -26,7 +26,8 @@
                 "im:history",
                 "channels:history",
                 "groups:history",
-                "chat:write"
+                "chat:write",
+                "users:read"
             ]
         }
     },

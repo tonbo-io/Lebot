@@ -4,63 +4,59 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a **Generic AI Agent Platform** called "lebot" that enables Claude Code to work as an AI agent through Slack, with dynamic tool creation and usage capabilities. The platform consists of:
+This is a **Slack Assistant Bot** called "lebot" that integrates with Anthropic's Claude API to provide AI assistance directly in Slack workspaces. The bot leverages Slack's Assistant features to create natural conversational interfaces.
 
-1. **Core AI Agent**: Generic agent that can use and create tools dynamically
-2. **Slack Interface**: User interaction layer via Slack bot
-3. **Modular Tools**: Extensible tool ecosystem (Linear API, GitHub, databases, custom tools)
+Key features:
+- **Slack Assistant Integration**: Uses Slack's native Assistant API for seamless user interactions
+- **Claude API Integration**: Powered by Claude Sonnet 4 for intelligent responses
+- **Tool Integration**: Extensible architecture supporting tools like Linear API for project management
+- **OAuth Support**: Supports both Socket Mode and OAuth installation flows
 
-The architecture follows the pattern: **User ↔ Slack ↔ AI Agent ↔ Tools**
+The architecture follows: **User ↔ Slack Assistant ↔ LLM (Claude) ↔ Tools**
 
 ## Key Architecture Components
 
 ### Core Application Structure
-- **`app.py`**: Main entry point that initializes the Slack Bolt app and starts the SocketModeHandler
-- **`listeners/`**: Contains all event listeners and handlers organized by Slack Platform features
-- **`listeners/assistant.py`**: Primary assistant implementation using Slack's Assistant middleware (recommended approach)
-- **`listeners/events/`**: Alternative event-driven implementation (for reference/educational purposes)
+- **`app.py`**: Main entry point for Socket Mode - initializes Slack Bolt app with Socket Mode handler
+- **`app_oauth.py`**: Alternative entry point for OAuth flow - includes installation store and OAuth settings
+- **`slack_hook/`**: Main module containing Slack event handlers and LLM integration
+  - **`__init__.py`**: Registers the assistant with the Slack app
+  - **`assistant.py`**: Implements Slack Assistant event handlers using decorators
+  - **`llm.py`**: LLM integration layer with Claude API and markdown-to-Slack formatting
 
-### LLM Integration
-- **`listeners/llm_caller.py`**: Contains `LLMCaller` class that handles communication with Anthropic's Claude API
-- The class encapsulates API client initialization, message processing, and markdown-to-Slack formatting conversion
-- Uses Claude Sonnet 4 model by default with configurable system prompts
+### Tools and Integrations
+- **`tools/`**: Core tools and libraries for bot functionality
+  - **`graphql.py`**: Generic GraphQL client and specialized Linear API client
+    - `GraphQLClient`: Base class for GraphQL API interactions
+    - `LinearClient`: Pre-configured client for Linear project management with built-in methods:
+      - `test_connection()`: Validates API connectivity
+      - `get_issues()`: Fetches issues with optional team filtering
+      - `get_in_progress_issues()`: Fetches all "started" state issues
+      - `get_issues_by_date_range()`: Date-filtered queries with full details and comments
+      - `query()`: Execute custom GraphQL queries
 
-### GraphQL Client
-- **`graphql_client.py`**: Simple GraphQL client module for HTTP requests to GraphQL endpoints
-- **`GraphQLClient`**: Generic GraphQL client that uses requests library with JSON format support
-- **`LinearClient`**: Specialized client for Linear API with pre-configured endpoints and helper methods
-- Supports query variables, error handling, and authentication
-- Used for integrating with Linear's project management data
+### Testing
+- **`tests/`**: Test suite for various components
+  - **`test_graphql_client.py`**: Tests for GraphQL/Linear client functionality
+  - **`test_date_filter.py`**: Tests for date filtering in Linear queries
+  - **`test_simple.py`**: Basic unit tests
 
-### Assistant Implementation Pattern
-The codebase provides two approaches:
-1. **Assistant Middleware** (recommended): Uses `@assistant.thread_started` and `@assistant.user_message` decorators
-2. **Event Listeners** (educational): Manual event handling for `assistant_thread_started`, `assistant_thread_context_changed`, and `message` events
+### Configuration Files
+- **`manifest.json`**: Slack app manifest defining capabilities, scopes, and event subscriptions
+- **`pyproject.toml`**: Python project configuration (Black formatter, pytest settings)
+- **`requirements.txt`**: Python dependencies
+- **`.env.example`**: Template for environment variables
 
 ## Development Commands
 
-### IMPORTANT: Always Activate Virtual Environment First
 ```bash
-# ALWAYS activate the virtual environment before running any Python commands
-source .venv/bin/activate  # On Windows: .\.venv\Scripts\Activate
-```
-
-### Setup and Installation
-```bash
-# Create virtual environment
+# Setup (first time only)
 python3 -m venv .venv
-source .venv/bin/activate  # On Windows: .\.venv\Scripts\Activate
-
-# Install dependencies
+source .venv/bin/activate  # Windows: .\.venv\Scripts\Activate
 pip install -r requirements.txt
-```
 
-### Running the Application
-```bash
-# ALWAYS activate virtual environment first
+# Run the bot (always activate venv first)
 source .venv/bin/activate
-
-# Start the bot (requires environment variables set)
 python3 app.py
 ```
 
@@ -69,53 +65,60 @@ Create a `.env` file based on `.env.example`:
 ```bash
 # Copy the example file
 cp .env.example .env
-
-# Edit the .env file with your actual tokens
-SLACK_BOT_TOKEN=<your-bot-token>
-SLACK_APP_TOKEN=<your-app-token>
-ANTHROPIC_API_KEY=<your-anthropic-api-key>
-LINEAR_API_KEY=<your-linear-api-key>  # Optional: for Linear integration
 ```
 
-### Code Quality Commands
+#### For Socket Mode (app.py):
 ```bash
-# ALWAYS activate virtual environment first
+SLACK_BOT_TOKEN=xoxb-your-bot-token
+SLACK_APP_TOKEN=xapp-your-app-token
+ANTHROPIC_API_KEY=sk-ant-api03-your-api-key
+LINEAR_OAUTH_KEY=lin_api_your_key  # Optional: for Linear integration
+```
+
+#### For OAuth Mode (app_oauth.py):
+```bash
+SLACK_CLIENT_ID=your-client-id
+SLACK_CLIENT_SECRET=your-client-secret
+SLACK_SIGNING_SECRET=your-signing-secret
+ANTHROPIC_API_KEY=sk-ant-api03-your-api-key
+LINEAR_OAUTH_KEY=lin_api_your_key  # Optional: for Linear integration
+```
+
+### Code Quality
+```bash
 source .venv/bin/activate
-
-# Linting
-flake8 *.py
-
-# Code formatting
-black .
-
-# Testing
-pytest
+flake8 *.py && flake8 slack_hook/ && flake8 tools/  # Lint
+black .                                              # Format
+pytest                                               # Test
 ```
 
 ## Important Implementation Details
 
 ### Slack App Configuration
-- App manifest is defined in `manifest.json` with assistant features enabled
-- Requires `assistant:write`, `channels:join`, `im:history`, `channels:history`, `groups:history`, and `chat:write` scopes
-- Uses Socket Mode for real-time communication
+- App manifest in `manifest.json` defines:
+  - Assistant feature with custom description
+  - Required OAuth scopes: `assistant:write`, `channels:join`, `im:history`, `channels:history`, `groups:history`, `chat:write`
+  - Event subscriptions: `assistant_thread_started`, `assistant_thread_context_changed`, `message.im`
+  - Socket Mode enabled by default (can use OAuth mode with `app_oauth.py`)
 
 ### Message Flow
-1. User sends message in assistant thread
-2. `assistant.py` retrieves conversation history using `conversations_replies`
-3. Messages are formatted and sent to `LLMCaller.call_llm()`
-4. Claude API processes the request with system prompt
-5. Response is converted from markdown to Slack mrkdwn format
-6. Bot responds in the thread
+1. User opens a new assistant thread or sends a message
+2. Slack triggers `@assistant.thread_started` or `@assistant.user_message` handlers
+3. Handler retrieves thread history via `conversations_replies` API
+4. Messages are formatted as a conversation array (role: user/assistant)
+5. `LLM.message()` sends conversation to Claude API with system prompt
+6. Claude's response is converted from markdown to Slack mrkdwn format
+7. Bot posts the formatted response back to the thread
 
 ### Code Formatting Configuration
 - Black line length: 125 characters (configured in `pyproject.toml`)
 - Pytest configuration includes debug logging to `logs/pytest.log`
 
-## GraphQL Client Usage
+## Linear Tools Usage
 
-### Basic Usage
+### Using LinearClient for GraphQL Queries
 ```python
-from graphql_client import LinearClient
+from tools.graphql import LinearClient
 
 # Initialize with Linear API key
 linear = LinearClient('your_linear_api_key')
@@ -123,32 +126,61 @@ linear = LinearClient('your_linear_api_key')
 # Test connection
 result = linear.test_connection()
 
-# Get all issues
-issues = linear.get_issues()
+# Get basic issues
+issues = linear.get_issues(limit=50)
+team_issues = linear.get_issues(team_id='team_uuid', limit=50)
 
-# Get issues for specific team
-team_issues = linear.get_issues(team_id='team_uuid')
+# Get in-progress issues
+in_progress = linear.get_in_progress_issues()
 
-# Get teams
-teams = linear.get_teams()
-
-# Create new issue
-new_issue = linear.create_issue(
-    team_id='team_uuid',
-    title='New issue',
-    description='Description here',
-    priority=2
+# Get issues by date range
+from datetime import datetime, timedelta
+end_date = datetime.now()
+start_date = end_date - timedelta(days=7)
+weekly_issues = linear.get_issues_by_date_range(
+    start_date=start_date.strftime('%Y-%m-%d'),
+    end_date=end_date.strftime('%Y-%m-%d'),
+    team_id='team_uuid',  # optional
+    limit=200
 )
+
+# Custom GraphQL queries
+custom_query = """
+query GetMyCustomData {
+    issues(filter: { priority: { gte: 2 } }) {
+        nodes {
+            id
+            title
+            priority
+        }
+    }
+}
+"""
+result = linear.query(custom_query)
 ```
 
+
 ### Important Notes
-- Linear API keys should NOT include "Bearer" prefix in Authorization header
-- Use team IDs (UUIDs) for filtering, not team keys
-- The client handles JSON format HTTP queries and GraphQL variables automatically
+- **Linear API Docs**: https://linear.app/developers | [GraphQL Explorer](https://studio.apollographql.com/public/Linear-API/variant/current/explorer)
+- Security: Store API keys in `.env` file (see `.env.example`), never commit to version control
 
-## Security Considerations
+## Assistant Implementation
+- **Model**: Claude Sonnet 4 (`claude-sonnet-4-20250514`)
+- **Features**: Thread context, status updates ("is typing..."), markdown→mrkdwn conversion
+- **Preserves**: Slack mentions `<@USER_ID>` and channels `<#CHANNEL_ID>`
 
-- API keys are loaded from environment variables using python-dotenv for secure configuration
-- Create a `.env` file (not committed to version control) with your actual API keys
-- The `.env.example` file shows the required environment variables without exposing sensitive data
-- Linear API keys should be stored securely and not committed to version control
+## Tool Architecture
+- **Core Tools** (`tools/`): GraphQL client infrastructure
+- **Scripts** (`scripts/`): Standalone executables for Linear analysis
+
+## Future Architecture: Claude Code Integration
+
+There is a comprehensive plan to enhance the Slack bot with Claude Code's advanced capabilities (file operations, code generation, script execution). This would transform the bot from a simple conversational assistant into a powerful development tool.
+
+**See**: [`docs/claude-code-integration-architecture.md`](docs/claude-code-integration-architecture.md) for the detailed integration plan.
+
+Key benefits of this architecture:
+- Leverages Claude Code's existing capabilities instead of rebuilding them
+- Enables dynamic script discovery and execution
+- Maintains conversation context across Slack threads
+- Provides safe, sandboxed execution environment

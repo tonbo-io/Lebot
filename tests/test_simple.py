@@ -5,7 +5,7 @@ Simple test to debug Linear GraphQL query issues
 
 import os
 from dotenv import load_dotenv
-from tools.graphql_client import LinearClient
+from tools.graphql import LinearClient
 
 
 def test_simple_query():
@@ -29,9 +29,15 @@ def test_simple_query():
         result = linear.get_issues(limit=5)
         print(f"✅ Simple query successful - found {len(result.get('issues', {}).get('nodes', []))} issues")
 
-        # Test 3: Try the new method without date filters
-        print("\n🧪 Testing new method without date filters...")
-        result = linear.get_issues_with_status_and_comments(limit=5)
+        # Test 3: Try the date range method
+        print("\n🧪 Testing date range method...")
+        from datetime import datetime, timedelta
+
+        end_date = datetime.now()
+        start_date = end_date - timedelta(days=7)
+        result = linear.get_issues_by_date_range(
+            start_date=start_date.strftime("%Y-%m-%d"), end_date=end_date.strftime("%Y-%m-%d"), limit=5
+        )
         summary = result.get("summary", {})
         print(
             f"✅ New method successful - {summary.get('total_issues', 0)} issues, {summary.get('total_assignees', 0)} assignees"

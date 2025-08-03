@@ -5,9 +5,10 @@ from typing import List, Dict, Optional
 from anthropic import Anthropic
 from anthropic.types import TextBlock
 from slack_bolt import SetStatus
+from slack_sdk import WebClient
 
 
-class LLMCaller:
+class LLM:
     DEFAULT_SYSTEM_CONTENT = """
 You're an assistant in a Slack workspace.
 Users in the workspace will ask you to help them write something or to think better about a specific topic.
@@ -23,7 +24,7 @@ When a prompt has Slack's special syntax like <@USER_ID> or <#CHANNEL_ID>, you m
             raise ValueError("ANTHROPIC_API_KEY environment variable is required")
         self.client = Anthropic(api_key=api_key)
 
-    def call_llm(
+    def message(
         self,
         set_status: SetStatus,
         messages_in_thread: List[Dict[str, str]],
@@ -46,7 +47,7 @@ When a prompt has Slack's special syntax like <@USER_ID> or <#CHANNEL_ID>, you m
 
         content = response.content[0]
         if isinstance(content, TextBlock):
-            return LLMCaller.markdown_to_slack(content.text)
+            return LLM.markdown_to_slack(content.text)
 
         return "I'm not sure how to respond to that."
 

@@ -2,7 +2,7 @@
 Test file demonstrating usage of the GraphQL client.
 """
 
-from tools.graphql_client import GraphQLClient, LinearClient
+from tools.graphql import GraphQLClient, LinearClient
 
 
 def test_basic_graphql_client():

@@ -96,74 +96,6 @@ class LinearClient(GraphQLClient):
         """
         super().__init__(endpoint="https://api.linear.app/graphql", headers={"Authorization": api_key})
 
-    def get_issues(self, team_id: Optional[str] = None, limit: int = 50) -> Any:
-        """
-        Get issues from Linear.
-
-        Args:
-            team_id: Optional team ID to filter issues
-            limit: Maximum number of issues to return
-
-        Returns:
-            Issues data from Linear
-        """
-        if team_id:
-            query = """
-            query GetIssues($first: Int, $teamId: String!) {
-                issues(filter: { team: { id: { eq: $teamId } } }, first: $first) {
-                    nodes {
-                        id
-                        identifier
-                        title
-                        description
-                        state {
-                            name
-                        }
-                        assignee {
-                            name
-                            email
-                        }
-                        team {
-                            key
-                            name
-                        }
-                        createdAt
-                        updatedAt
-                    }
-                }
-            }
-            """
-            variables = {"first": limit, "teamId": team_id}
-        else:
-            query = """
-            query GetIssues($first: Int) {
-                issues(first: $first) {
-                    nodes {
-                        id
-                        identifier
-                        title
-                        description
-                        state {
-                            name
-                        }
-                        assignee {
-                            name
-                            email
-                        }
-                        team {
-                            key
-                            name
-                        }
-                        createdAt
-                        updatedAt
-                    }
-                }
-            }
-            """
-            variables = {"first": limit}
-
-        return self.query(query, variables)
-
     def test_connection(self) -> Any:
         """
         Test the API connection with a simple query.
@@ -182,228 +114,113 @@ class LinearClient(GraphQLClient):
         """
         return self.query(query)
 
-    def get_teams(self, include_archived: bool = False) -> Any:
+    def get_issues(self, team_id: Optional[str] = None, limit: int = 50) -> Any:
         """
-        Get teams from Linear.
-
-        Args:
-            include_archived: Whether to include archived teams
-
-        Returns:
-            Teams data from Linear
-        """
-        query = """
-        query GetTeams($includeArchived: Boolean) {
-            teams(includeArchived: $includeArchived) {
-                nodes {
-                    id
-                    key
-                    name
-                    description
-                    createdAt
-                    updatedAt
-                    archivedAt
-                    private
-                    issueCount
-                    activeIssueCount
-                    completedIssueCount
-                    members {
-                        nodes {
-                            id
-                            name
-                            email
-                        }
-                    }
-                }
-                pageInfo {
-                    hasNextPage
-                    endCursor
-                }
-            }
-        }
-        """
-
-        variables = {"includeArchived": include_archived}
-
-        return self.query(query, variables)
-
-    def get_viewer(self) -> Any:
-        """
-        Get the authenticated user information.
-
-        Returns:
-            Viewer (authenticated user) data from Linear
-        """
-        query = """
-        query GetViewer {
-            viewer {
-                id
-                name
-                email
-                displayName
-                avatarUrl
-                admin
-                createdAt
-                updatedAt
-                organization {
-                    id
-                    name
-                    urlKey
-                }
-                teams {
-                    nodes {
-                        id
-                        key
-                        name
-                    }
-                }
-            }
-        }
-        """
-
-        return self.query(query)
-
-    def get_issue_by_id(self, issue_id: str) -> Any:
-        """
-        Get a specific issue by ID.
-
-        Args:
-            issue_id: The issue ID
-
-        Returns:
-            Issue data from Linear
-        """
-        query = """
-        query GetIssue($id: String!) {
-            issue(id: $id) {
-                id
-                identifier
-                title
-                description
-                state {
-                    id
-                    name
-                    type
-                }
-                assignee {
-                    id
-                    name
-                    email
-                }
-                team {
-                    id
-                    key
-                    name
-                }
-                labels {
-                    nodes {
-                        id
-                        name
-                        color
-                    }
-                }
-                priority
-                estimate
-                createdAt
-                updatedAt
-                archivedAt
-                comments {
-                    nodes {
-                        id
-                        body
-                        user {
-                            id
-                            name
-                        }
-                        createdAt
-                    }
-                }
-            }
-        }
-        """
-
-        variables = {"id": issue_id}
-        return self.query(query, variables)
-
-    def create_issue(
-        self,
-        team_id: str,
-        title: str,
-        description: Optional[str] = None,
-        assignee_id: Optional[str] = None,
-        priority: Optional[int] = None,
-    ) -> Any:
-        """
-        Create a new issue in Linear.
-
-        Args:
-            team_id: The team ID where the issue will be created
-            title: The issue title
-            description: Optional issue description
-            assignee_id: Optional assignee user ID
-            priority: Optional priority (0-4, where 4 is urgent)
-
-        Returns:
-            Created issue data from Linear
-        """
-        mutation = """
-        mutation CreateIssue($input: IssueCreateInput!) {
-            issueCreate(input: $input) {
-                success
-                issue {
-                    id
-                    identifier
-                    title
-                    description
-                    state {
-                        id
-                        name
-                        type
-                    }
-                    assignee {
-                        id
-                        name
-                        email
-                    }
-                    team {
-                        id
-                        key
-                        name
-                    }
-                    priority
-                    createdAt
-                }
-            }
-        }
-        """
-
-        input_data: Dict[str, str | int] = {"teamId": team_id, "title": title}
-
-        if description:
-            input_data["description"] = description
-        if assignee_id:
-            input_data["assigneeId"] = assignee_id
-        if priority is not None:
-            input_data["priority"] = priority
-
-        variables = {"input": input_data}
-        return self.query(mutation, variables)
-
-    def get_issues_with_status_and_comments(
-        self,
-        team_id: Optional[str] = None,
-        limit: int = 100,
-        start_date: Optional[str] = None,
-        end_date: Optional[str] = None,
-    ) -> Dict[str, Any]:
-        """
-        Get issues with status and comments, grouped by assignee and date, ordered by date descending.
+        Get issues from Linear with basic information.
 
         Args:
             team_id: Optional team ID to filter issues
             limit: Maximum number of issues to return
-            start_date: Optional start date filter (ISO format: YYYY-MM-DD or YYYY-MM-DDTHH:MM:SSZ)
-            end_date: Optional end date filter (ISO format: YYYY-MM-DD or YYYY-MM-DDTHH:MM:SSZ)
+
+        Returns:
+            Issues data from Linear
+        """
+        filter_str = ""
+        variables: Dict[str, Any] = {"first": limit}
+
+        if team_id:
+            filter_str = "filter: { team: { id: { eq: $teamId } } }, "
+            variables["teamId"] = team_id
+
+        query = f"""
+        query GetIssues($first: Int{', $teamId: String!' if team_id else ''}) {{
+            issues({filter_str}first: $first) {{
+                nodes {{
+                    id
+                    identifier
+                    title
+                    description
+                    state {{
+                        name
+                        type
+                    }}
+                    assignee {{
+                        name
+                        email
+                    }}
+                    team {{
+                        key
+                        name
+                    }}
+                    createdAt
+                    updatedAt
+                }}
+            }}
+        }}
+        """
+
+        return self.query(query, variables)
+
+    def get_in_progress_issues(self, limit: int = 200) -> Any:
+        """
+        Get all in-progress issues across all teams.
+
+        Args:
+            limit: Maximum number of issues to return
+
+        Returns:
+            In-progress issues data from Linear
+        """
+        query = """
+        query GetInProgressIssues($first: Int) {
+            issues(filter: { state: { type: { eq: "started" } } }, first: $first) {
+                nodes {
+                    id
+                    identifier
+                    title
+                    state {
+                        name
+                        type
+                    }
+                    assignee {
+                        name
+                        email
+                    }
+                    team {
+                        name
+                    }
+                    updatedAt
+                    comments {
+                        nodes {
+                            createdAt
+                            body
+                            user {
+                                name
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        """
+
+        return self.query(query, {"first": limit})
+
+    def get_issues_by_date_range(
+        self,
+        start_date: str,
+        end_date: str,
+        team_id: Optional[str] = None,
+        limit: int = 200,
+    ) -> Dict[str, Any]:
+        """
+        Get issues within a date range with full details including comments.
+
+        Args:
+            start_date: Start date filter (ISO format: YYYY-MM-DD or YYYY-MM-DDTHH:MM:SSZ)
+            end_date: End date filter (ISO format: YYYY-MM-DD or YYYY-MM-DDTHH:MM:SSZ)
+            team_id: Optional team ID to filter issues
+            limit: Maximum number of issues to return
 
         Returns:
             Dictionary with issues grouped by assignee and date, ordered by date descending
@@ -414,12 +231,8 @@ class LinearClient(GraphQLClient):
         if team_id:
             filter_conditions.append("team: { id: { eq: $teamId } }")
 
-        if start_date and end_date:
-            filter_conditions.append("createdAt: { gte: $startDate, lte: $endDate }")
-        elif start_date:
-            filter_conditions.append("createdAt: { gte: $startDate }")
-        elif end_date:
-            filter_conditions.append("createdAt: { lte: $endDate }")
+        # Date range filter is now required
+        filter_conditions.append("createdAt: { gte: $startDate, lte: $endDate }")
 
         # Build filter string
         filter_str = ""
@@ -427,20 +240,16 @@ class LinearClient(GraphQLClient):
             filter_str = f"filter: {{ {', '.join(filter_conditions)} }}, "
 
         # Build variables
-        variables: Dict[str, int | str] = {"first": limit}
-        query_params = ["$first: Int"]
+        variables: Dict[str, int | str] = {
+            "first": limit,
+            "startDate": self._format_date_for_graphql(start_date),
+            "endDate": self._format_date_for_graphql(end_date),
+        }
+        query_params = ["$first: Int", "$startDate: DateTimeOrDuration!", "$endDate: DateTimeOrDuration!"]
 
         if team_id:
             variables["teamId"] = team_id
             query_params.append("$teamId: String!")
-
-        if start_date:
-            variables["startDate"] = self._format_date_for_graphql(start_date)
-            query_params.append("$startDate: DateTimeOrDuration!")
-
-        if end_date:
-            variables["endDate"] = self._format_date_for_graphql(end_date)
-            query_params.append("$endDate: DateTimeOrDuration!")
 
         query_params_str = ", ".join(query_params)
 

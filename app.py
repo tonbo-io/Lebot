@@ -2,13 +2,13 @@ import os
 import logging
 from dotenv import load_dotenv
 
+# Load environment variables before any other imports
+load_dotenv()
+
 from slack_bolt import App
 from slack_bolt.adapter.socket_mode import SocketModeHandler
 
 from slack_hook import register
-
-# Load environment variables
-load_dotenv()
 
 # Initialization
 logging.basicConfig(level=logging.DEBUG)

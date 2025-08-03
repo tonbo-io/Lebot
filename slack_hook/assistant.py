@@ -4,11 +4,11 @@ from slack_bolt import Assistant, BoltContext, Say, SetSuggestedPrompts, SetStat
 from slack_bolt.context.get_thread_context import GetThreadContext
 from slack_sdk import WebClient
 
-from .llm import LLMCaller
+from .claude_code_llm_native import ClaudeCodeLLMNative
 
 # Refer to https://tools.slack.dev/bolt-python/concepts/assistant/ for more details
 assistant = Assistant()
-llm_caller = LLMCaller()
+llm = ClaudeCodeLLMNative()
 
 
 # This listener is invoked when a human user opened an assistant thread
@@ -60,8 +60,11 @@ def respond_in_assistant_thread(
             role = "user" if message.get("bot_id") is None else "assistant"
             messages_in_thread.append({"role": role, "content": message["text"]})
     try:
-        returned_message = llm_caller.call_llm(set_status, messages_in_thread)
-        say(returned_message)
+        # Pass thread_ts as the thread_id for session management and say function for streaming
+        returned_message = llm.message(set_status, messages_in_thread, thread_id=context.thread_ts, say=say)
+        # If returned_message is None, responses were already sent via streaming
+        if returned_message:
+            say(returned_message)
     except Exception as e:
         logger.exception(f"Failed to handle a user message event: {e}")
         say(f":warning: Something went wrong! ({e})")

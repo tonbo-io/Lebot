@@ -7,7 +7,7 @@ with date range filtering for the last 3 days.
 import os
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
-from tools.graphql_client import LinearClient
+from tools.graphql import LinearClient
 
 
 def test_date_range_filtering():
@@ -53,8 +53,8 @@ def test_date_range_filtering():
 
     try:
         # Test the method with date range filtering
-        print("\n🔍 Calling get_issues_with_status_and_comments with date filter...")
-        result = linear.get_issues_with_status_and_comments(start_date=start_date_str, end_date=end_date_str, limit=50)
+        print("\n🔍 Calling get_issues_by_date_range with date filter...")
+        result = linear.get_issues_by_date_range(start_date=start_date_str, end_date=end_date_str, limit=50)
 
         # Display results
         print(f"\n📊 Results Summary:")
@@ -99,7 +99,7 @@ def test_date_range_filtering():
         iso_start = start_date.isoformat() + "Z"
         iso_end = end_date.isoformat() + "Z"
 
-        result_iso = linear.get_issues_with_status_and_comments(start_date=iso_start, end_date=iso_end, limit=10)
+        result_iso = linear.get_issues_by_date_range(start_date=iso_start, end_date=iso_end, limit=10)
 
         print(f"   ISO format test - Total issues: {result_iso.get('summary', {}).get('total_issues', 0)}")
 

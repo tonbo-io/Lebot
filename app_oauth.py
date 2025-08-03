@@ -1,5 +1,11 @@
 import logging
 import os
+from dotenv import load_dotenv
+
+
+# Load environment variables
+load_dotenv()
+
 from slack_bolt import App, BoltResponse
 from slack_bolt.oauth.callback_options import CallbackOptions, SuccessArgs, FailureArgs
 from slack_bolt.oauth.oauth_settings import OAuthSettings
