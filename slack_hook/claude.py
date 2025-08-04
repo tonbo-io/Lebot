@@ -135,7 +135,7 @@ When a prompt has Slack's special syntax like <@USER_ID> or <#CHANNEL_ID>, you m
         tool_registry: Any,
         tools: Optional[List[Dict[str, Any]]] = None,
         system_content: Optional[str] = None,
-        thinking_budget: int = 16384,  # Default budget for thinking mode
+        thinking_budget: int = 8192,  # Default budget for thinking mode
         model: str = "claude-sonnet-4-20250514",  # Model to use (default: Sonnet 4)
     ) -> None:
         """Send messages with interleaved thinking mode and optional tools.
@@ -169,7 +169,7 @@ When a prompt has Slack's special syntax like <@USER_ID> or <#CHANNEL_ID>, you m
 
         # Prepare request parameters
         request_params = {
-            "max_tokens": 16384,
+            "max_tokens": 4096,
             "messages": messages,
             "model": model,
             "system": system_content,

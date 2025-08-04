@@ -98,15 +98,15 @@ When working with Claude Code in VS Code, the following MCP (Model Context Proto
 #### `mcp__ide__getDiagnostics`
 - **Purpose**: Get language server diagnostics (type hints, linting errors, etc.) from VS Code
 - **Usage**: Check for type hint warnings, syntax errors, and other code issues
-- **Example**: 
+- **Example**:
   ```python
   # Check diagnostics for a specific file
   mcp__ide__getDiagnostics(uri="file:///path/to/file.py")
-  
+
   # Check diagnostics for all open files
   mcp__ide__getDiagnostics()
   ```
-- **Benefits**: 
+- **Benefits**:
   - Catches type hint incompatibilities
   - Identifies unused imports and variables
   - Detects syntax errors before runtime
@@ -120,10 +120,13 @@ When working with Claude Code in VS Code, the following MCP (Model Context Proto
   - Required OAuth scopes: `assistant:write`, `channels:join`, `im:history`, `channels:history`, `groups:history`, `chat:write`
   - Event subscriptions: `assistant_thread_started`, `assistant_thread_context_changed`, `message.im`
   - Socket Mode enabled by default (can use OAuth mode with `app_oauth.py`)
+  - Interactivity enabled for button actions
 
 ### Message Flow
 1. User opens a new assistant thread or sends a message
 2. Slack triggers `@assistant.thread_started` or `@assistant.user_message` handlers
+   - On thread start: Bot displays greeting with model selection buttons
+   - Button clicks trigger `enable_beast_mode` or `enable_normal_mode` actions
 3. Handler retrieves thread history via `conversations_replies` API
 4. Messages are formatted as a conversation array (role: user/assistant)
    - Assistant messages are parsed to recover thinking blocks and tool uses
@@ -195,8 +198,14 @@ result = linear.query(custom_query)
 - Security: Store API keys in `.env` file (see `.env.example`), never commit to version control
 
 ## Assistant Implementation
-- **Model**: Claude Sonnet 4 (`claude-sonnet-4-20250514`)
-- **Features**: 
+- **Models**:
+  - Default: Claude Sonnet 4 (`claude-sonnet-4-20250514`)
+  - Beast Mode: Claude Opus 4 (`claude-opus-4-20250514`) - available via interactive buttons
+- **Model Selection**: Interactive buttons in the initial greeting allow switching between models
+  - Normal Mode button: Uses Claude Sonnet 4 (default, optimized for speed)
+  - Beast Mode button: Activates Claude Opus 4 (maximum intelligence and capability)
+  - Model preference is stored per thread and persists throughout the conversation
+- **Features**:
   - Thread context with full conversation history
   - Status updates ("is thinking...", "using tool_name...", "processing tool results...")
   - Markdown to Slack mrkdwn conversion

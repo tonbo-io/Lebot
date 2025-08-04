@@ -184,9 +184,39 @@ def create_assistant(tool_registry: ToolRegistry) -> Assistant:
     ):
 
         try:
-            # Note: assistant.thread_started doesn't reliably provide user context
-            # We'll personalize the greeting in the user_message handler instead
-            say("How can I help you?")
+            # Send greeting with model selection buttons
+            say(
+                blocks=[
+                    {"type": "section", "text": {"type": "mrkdwn", "text": "How can I help you?"}},
+                    {
+                        "type": "actions",
+                        "elements": [
+                            {
+                                "type": "button",
+                                "text": {"type": "plain_text", "text": ":zap: Beast Mode (Opus 4)", "emoji": True},
+                                "value": "beast_mode",
+                                "action_id": "enable_beast_mode",
+                            },
+                            {
+                                "type": "button",
+                                "text": {
+                                    "type": "plain_text",
+                                    "text": ":white_check_mark: Normal Mode (Sonnet 4)",
+                                    "emoji": True,
+                                },
+                                "value": "normal_mode",
+                                "action_id": "enable_normal_mode",
+                                "style": "primary",  # Highlight normal mode as active
+                            },
+                        ],
+                    },
+                    {
+                        "type": "context",
+                        "elements": [{"type": "mrkdwn", "text": "Currently using: *Normal Mode* (Claude Sonnet 4)"}],
+                    },
+                ],
+                text="How can I help you?",
+            )
         except Exception as e:
             logger.exception(f"Failed to handle an assistant_thread_started event: {e}", e)
             say(f":warning: Something went wrong! ({e})")
@@ -311,27 +341,20 @@ def create_assistant(tool_registry: ToolRegistry) -> Assistant:
     return assistant
 
 
-# Slash command handler for /beast
-def handle_beast_command(ack: Ack, command: Dict[str, Any], client: WebClient, logger: logging.Logger):
-    """Handle the /beast slash command to enable Claude Opus 4 for a thread."""
-    ack()  # Acknowledge the command immediately
+# Button action handler for beast mode
+def handle_beast_mode_button(ack: Ack, body: Dict[str, Any], client: WebClient, logger: logging.Logger):
+    """Handle the beast mode button click to enable Claude Opus 4 for a thread."""
+    ack()  # Acknowledge the action immediately
 
-    channel_id = command.get("channel_id")
-    thread_ts = command.get("thread_ts")
-    user_id = command.get("user_id")
+    # Extract necessary information from the body
+    channel_id = body.get("channel", {}).get("id")
+    thread_ts = body.get("message", {}).get("thread_ts") or body.get("message", {}).get("ts")
+    user_id = body.get("user", {}).get("id")
+    message_ts = body.get("message", {}).get("ts")
 
     # Validate required fields
-    if not channel_id or not user_id:
-        logger.error("Missing channel_id or user_id in command")
-        return
-
-    # If not in a thread, inform the user
-    if not thread_ts:
-        client.chat_postEphemeral(
-            channel=channel_id,
-            user=user_id,
-            text=":warning: Please use `/beast` within a thread to enable beast mode for that conversation.",
-        )
+    if not channel_id or not user_id or not thread_ts:
+        logger.error(f"Missing required fields: channel_id={channel_id}, user_id={user_id}, thread_ts={thread_ts}")
         return
 
     # Store the model preference for this thread
@@ -340,37 +363,69 @@ def handle_beast_command(ack: Ack, command: Dict[str, Any], client: WebClient, l
 
     thread_models[channel_id][thread_ts] = "claude-opus-4-20250514"
 
-    # Confirm to the user
-    client.chat_postMessage(
-        channel=channel_id,
-        thread_ts=thread_ts,
-        text=":zap: *Beast Mode Activated!* :zap:\nThis thread is now using Claude Opus 4 for maximum intelligence and capability.",
-    )
+    # Update the original message with new status
+    try:
+        client.chat_update(
+            channel=channel_id,
+            ts=message_ts,
+            blocks=[
+                {"type": "section", "text": {"type": "mrkdwn", "text": "How can I help you?"}},
+                {
+                    "type": "actions",
+                    "elements": [
+                        {
+                            "type": "button",
+                            "text": {"type": "plain_text", "text": ":zap: Beast Mode (Opus 4)", "emoji": True},
+                            "value": "beast_mode",
+                            "action_id": "enable_beast_mode",
+                            "style": "danger",  # Change to danger to show it's active
+                        },
+                        {
+                            "type": "button",
+                            "text": {
+                                "type": "plain_text",
+                                "text": ":white_check_mark: Normal Mode (Sonnet 4)",
+                                "emoji": True,
+                            },
+                            "value": "normal_mode",
+                            "action_id": "enable_normal_mode",
+                        },
+                    ],
+                },
+                {
+                    "type": "context",
+                    "elements": [{"type": "mrkdwn", "text": "Currently using: *:zap: Beast Mode* (Claude Opus 4)"}],
+                },
+            ],
+            text="How can I help you?",
+        )
+
+        # Post a confirmation message in the thread
+        client.chat_postMessage(
+            channel=channel_id,
+            thread_ts=thread_ts,
+            text=":zap: *Beast Mode Activated!* :zap:\nThis thread is now using Claude Opus 4 for maximum intelligence and capability.",
+        )
+    except Exception as e:
+        logger.error(f"Failed to update message: {e}")
 
     logger.info(f"Beast mode enabled for thread {thread_ts} in channel {channel_id} by user {user_id}")
 
 
-# Slash command handler for /normal
-def handle_normal_command(ack: Ack, command: Dict[str, Any], client: WebClient, logger: logging.Logger):
-    """Handle the /normal slash command to switch back to Claude Sonnet 4."""
-    ack()  # Acknowledge the command immediately
+# Button action handler for normal mode
+def handle_normal_mode_button(ack: Ack, body: Dict[str, Any], client: WebClient, logger: logging.Logger):
+    """Handle the normal mode button click to switch back to Claude Sonnet 4."""
+    ack()  # Acknowledge the action immediately
 
-    channel_id = command.get("channel_id")
-    thread_ts = command.get("thread_ts")
-    user_id = command.get("user_id")
+    # Extract necessary information from the body
+    channel_id = body.get("channel", {}).get("id")
+    thread_ts = body.get("message", {}).get("thread_ts") or body.get("message", {}).get("ts")
+    user_id = body.get("user", {}).get("id")
+    message_ts = body.get("message", {}).get("ts")
 
     # Validate required fields
-    if not channel_id or not user_id:
-        logger.error("Missing channel_id or user_id in command")
-        return
-
-    # If not in a thread, inform the user
-    if not thread_ts:
-        client.chat_postEphemeral(
-            channel=channel_id,
-            user=user_id,
-            text=":warning: Please use `/normal` within a thread to switch back to normal mode for that conversation.",
-        )
+    if not channel_id or not user_id or not thread_ts:
+        logger.error(f"Missing required fields: channel_id={channel_id}, user_id={user_id}, thread_ts={thread_ts}")
         return
 
     # Remove the model preference for this thread (revert to default)
@@ -380,7 +435,50 @@ def handle_normal_command(ack: Ack, command: Dict[str, Any], client: WebClient, 
     else:
         message = ":information_source: This thread is already using normal mode (Claude Sonnet 4)."
 
-    # Confirm to the user
-    client.chat_postMessage(channel=channel_id, thread_ts=thread_ts, text=message)
+    # Update the original message with new status
+    try:
+        client.chat_update(
+            channel=channel_id,
+            ts=message_ts,
+            blocks=[
+                {"type": "section", "text": {"type": "mrkdwn", "text": "How can I help you?"}},
+                {
+                    "type": "actions",
+                    "elements": [
+                        {
+                            "type": "button",
+                            "text": {"type": "plain_text", "text": ":zap: Beast Mode (Opus 4)", "emoji": True},
+                            "value": "beast_mode",
+                            "action_id": "enable_beast_mode",
+                        },
+                        {
+                            "type": "button",
+                            "text": {
+                                "type": "plain_text",
+                                "text": ":white_check_mark: Normal Mode (Sonnet 4)",
+                                "emoji": True,
+                            },
+                            "value": "normal_mode",
+                            "action_id": "enable_normal_mode",
+                            "style": "primary",  # Change to primary to show it's active
+                        },
+                    ],
+                },
+                {
+                    "type": "context",
+                    "elements": [{"type": "mrkdwn", "text": "Currently using: *Normal Mode* (Claude Sonnet 4)"}],
+                },
+            ],
+            text="How can I help you?",
+        )
+
+        # Post a confirmation message in the thread
+        client.chat_postMessage(
+            channel=channel_id,
+            thread_ts=thread_ts,
+            text=message,
+        )
+    except Exception as e:
+        logger.error(f"Failed to update message: {e}")
 
     logger.info(f"Normal mode restored for thread {thread_ts} in channel {channel_id} by user {user_id}")

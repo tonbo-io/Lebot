@@ -1,11 +1,11 @@
-from .assistant import create_assistant, handle_beast_command, handle_normal_command
+from .assistant import create_assistant, handle_beast_mode_button, handle_normal_mode_button
 
 
 def register(app, tool_registry):
     # Create assistant with tool registry
     assistant = create_assistant(tool_registry)
-    
+
     app.assistant(assistant)
-    # Register slash command handlers
-    app.command("/beast")(handle_beast_command)
-    app.command("/normal")(handle_normal_command)
+    # Register button action handlers
+    app.action("enable_beast_mode")(handle_beast_mode_button)
+    app.action("enable_normal_mode")(handle_normal_mode_button)

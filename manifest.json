@@ -14,18 +14,6 @@
             "display_name": "Lebot",
             "always_online": false
         },
-        "slash_commands": [
-            {
-                "command": "/beast",
-                "description": "Switch to beast mode using Claude Opus 4 for this thread",
-                "should_escape": false
-            },
-            {
-                "command": "/normal",
-                "description": "Switch back to normal mode (Claude Sonnet 4) for this thread",
-                "should_escape": false
-            }
-        ],
         "assistant_view": {
             "assistant_description": "What do you want to build today?",
             "suggested_prompts": []
