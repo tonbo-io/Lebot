@@ -1,7 +1,7 @@
 {
     "display_information": {
-        "name": "lebot",
-        "description": "Lebot is an assistant.",
+        "name": "Lebot",
+        "description": "An assistant bot.",
         "background_color": "#222623"
     },
     "features": {
@@ -11,23 +11,33 @@
             "messages_tab_read_only_enabled": false
         },
         "bot_user": {
-            "display_name": "lebot",
+            "display_name": "Lebot",
             "always_online": false
         },
         "assistant_view": {
-            "assistant_description": "Hi, I'm lebot."
+            "assistant_description": "What do you want to build today?",
+            "suggested_prompts": []
         }
     },
     "oauth_config": {
         "scopes": {
             "bot": [
                 "assistant:write",
-                "channels:join",
-                "im:history",
                 "channels:history",
-                "groups:history",
+                "channels:join",
+                "channels:read",
                 "chat:write",
-                "users:read"
+                "groups:history",
+                "groups:read",
+                "im:history",
+                "im:read",
+                "mpim:read",
+                "users:read",
+                "users:read.email",
+                "channels:manage",
+                "groups:write",
+                "im:write",
+                "mpim:write"
             ]
         }
     },

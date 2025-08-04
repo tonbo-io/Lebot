@@ -92,6 +92,26 @@ black .                                              # Format
 pytest                                               # Test
 ```
 
+### IDE Integration (MCP Tools)
+When working with Claude Code in VS Code, the following MCP (Model Context Protocol) tools are available:
+
+#### `mcp__ide__getDiagnostics`
+- **Purpose**: Get language server diagnostics (type hints, linting errors, etc.) from VS Code
+- **Usage**: Check for type hint warnings, syntax errors, and other code issues
+- **Example**: 
+  ```python
+  # Check diagnostics for a specific file
+  mcp__ide__getDiagnostics(uri="file:///path/to/file.py")
+  
+  # Check diagnostics for all open files
+  mcp__ide__getDiagnostics()
+  ```
+- **Benefits**: 
+  - Catches type hint incompatibilities
+  - Identifies unused imports and variables
+  - Detects syntax errors before runtime
+  - Ensures code quality and type safety
+
 ## Important Implementation Details
 
 ### Slack App Configuration
@@ -106,9 +126,19 @@ pytest                                               # Test
 2. Slack triggers `@assistant.thread_started` or `@assistant.user_message` handlers
 3. Handler retrieves thread history via `conversations_replies` API
 4. Messages are formatted as a conversation array (role: user/assistant)
+   - Assistant messages are parsed to recover thinking blocks and tool uses
+   - Tool results are properly separated into user messages with `tool_result` blocks
+   - Thinking blocks are reordered to appear first (required by Claude's thinking mode)
 5. `LLM.message()` sends conversation to Claude API with system prompt
-6. Claude's response is converted from markdown to Slack mrkdwn format
-7. Bot posts the formatted response back to the thread
+6. Claude's response is processed:
+   - Thinking blocks are displayed as quoted text with metadata
+   - Text content is converted from markdown to Slack mrkdwn format
+   - Tool uses trigger tool execution with results shown in attachments
+7. If tools were used, the system automatically:
+   - Sends tool results back to Claude
+   - Processes any additional tool uses in follow-up responses
+   - Continues until no more tools are needed (max 10 rounds)
+8. Bot posts all responses back to the thread in real-time
 
 ### Code Formatting Configuration
 - Black line length: 125 characters (configured in `pyproject.toml`)
@@ -166,8 +196,16 @@ result = linear.query(custom_query)
 
 ## Assistant Implementation
 - **Model**: Claude Sonnet 4 (`claude-sonnet-4-20250514`)
-- **Features**: Thread context, status updates ("is typing..."), markdown→mrkdwn conversion
+- **Features**: 
+  - Thread context with full conversation history
+  - Status updates ("is thinking...", "using tool_name...", "processing tool results...")
+  - Markdown to Slack mrkdwn conversion
+  - Thinking mode with quoted text display and metadata tracking
+  - Tool execution with bash commands (built-in)
+  - Multi-round tool execution support (handles tools that use other tools)
+  - Automatic error detection and color-coded tool results
 - **Preserves**: Slack mentions `<@USER_ID>` and channels `<#CHANNEL_ID>`
+- **Tool Results**: Auto-collapse in Slack when >700 chars or >5 lines
 
 ## Tool Architecture
 - **Core Tools** (`tools/`): GraphQL client infrastructure

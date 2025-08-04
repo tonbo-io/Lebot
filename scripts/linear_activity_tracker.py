@@ -191,12 +191,12 @@ def format_issue_activity(issue: Dict[str, Any]) -> str:
     output.append(f"\n📋 **{issue['title']}**")
     output.append(f"   👤 Assignee: {assignee_info}")
     output.append(f"   📊 Current Status: {issue['state']['name']}")
-    
+
     # Project info
     if issue.get("project"):
         project = issue["project"]
         output.append(f"   📁 Project: {project['name']}")
-        
+
         # Initiative info
         if project.get("initiatives") and project["initiatives"].get("nodes"):
             initiatives = project["initiatives"]["nodes"]
@@ -206,7 +206,7 @@ def format_issue_activity(issue: Dict[str, Any]) -> str:
                     output.append(f"   🎯 Initiative: {initiative_names[0]}")
                 else:
                     output.append(f"   🎯 Initiatives: {', '.join(initiative_names)}")
-                
+
                 # Show initiative descriptions if they exist and are not too long
                 for initiative in initiatives:
                     if initiative.get("description") and len(initiative["description"]) <= 100:
@@ -223,7 +223,7 @@ def format_issue_activity(issue: Dict[str, Any]) -> str:
     if issue.get("filtered_comments"):
         output.append("   \n   💬 Comments (within date range):")
         sorted_comments = sorted(issue["filtered_comments"], key=lambda x: x["createdAt"])
-        
+
         for comment in sorted_comments:
             comment_date = datetime.fromisoformat(comment["createdAt"].replace("Z", "+00:00"))
             # Convert to naive for display

@@ -15,7 +15,7 @@ from claude_code_sdk import (
 from slack_bolt import SetStatus
 
 
-class ClaudeCodeLLMNative:
+class ClaudeCode:
     def __init__(self):
         # Claude Code SDK automatically uses ANTHROPIC_API_KEY from environment
         # Map Slack thread_id to Claude Code session_id
@@ -139,8 +139,8 @@ class ClaudeCodeLLMNative:
         """Convert markdown to Slack-compatible mrkdwn format."""
         # First convert headers to bold text (before splitting by code blocks)
         # This ensures headers are converted even if they contain code
-        content = re.sub(r'^#{1,6}\s+(.+)$', r'*\1*', content, flags=re.MULTILINE)
-        
+        content = re.sub(r"^#{1,6}\s+(.+)$", r"*\1*", content, flags=re.MULTILINE)
+
         # Split the input string into parts based on code blocks and inline code
         parts = re.split(r"(?s)(```.+?```|`[^`\n]+?`)", content)
 
