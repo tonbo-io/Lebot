@@ -3,16 +3,11 @@ from typing import Any, List, Dict, Union, Optional
 from slack_bolt import Assistant, BoltContext, Say, SetStatus, Ack
 from slack_sdk import WebClient
 
-from .llm import LLM
+from .claude import Claude
 from tools import ToolRegistry
 
-# Refer to https://tools.slack.dev/bolt-python/concepts/assistant/ for more details
-assistant = Assistant()
-
 # Initialize LLM lazily to avoid import-time errors
-llm = LLM()
-# Tool registry will be initialized later with WebClient
-tool_registry = None
+llm = Claude()
 
 # Thread model preferences - stores model choice per thread
 # Format: {channel_id: {thread_ts: "model_name"}}
@@ -167,148 +162,153 @@ def parse_assistant_message(
     return ordered_blocks
 
 
-# This listener is invoked when a human user opened an assistant thread
-@assistant.thread_started
-def start_assistant_thread(
-    say: Say,
-    logger: logging.Logger,
-    client: WebClient,
-):
-    global tool_registry
-    # Initialize tool registry with WebClient if not already done
-    if tool_registry is None:
-        tool_registry = ToolRegistry(slack_client=client)
-        logger.info("Initialized tool registry with Slack client")
+def create_assistant(tool_registry: ToolRegistry) -> Assistant:
+    """Factory function to create an Assistant with the given tool registry.
 
-    try:
-        say("How can I help you?")
-    except Exception as e:
-        logger.exception(f"Failed to handle an assistant_thread_started event: {e}", e)
-        say(f":warning: Something went wrong! ({e})")
+    Args:
+        tool_registry: The ToolRegistry instance to use for tool execution
 
+    Returns:
+        A configured Assistant instance
+    """
+    # Refer to https://tools.slack.dev/bolt-python/concepts/assistant/ for more details
+    assistant = Assistant()
 
-# This listener is invoked when the human user sends a reply in the assistant thread
-@assistant.user_message
-def respond_in_assistant_thread(
-    logger: logging.Logger,
-    context: BoltContext,
-    set_status: SetStatus,
-    client: WebClient,
-    say: Say,
-):
-    global tool_registry
-    # Initialize tool registry with WebClient if not already done
-    if tool_registry is None:
-        tool_registry = ToolRegistry(slack_client=client)
-        logger.info("Initialized tool registry with Slack client")
+    # This listener is invoked when a human user opened an assistant thread
+    @assistant.thread_started
+    def start_assistant_thread(
+        say: Say,
+        logger: logging.Logger,
+        context: BoltContext,
+        client: WebClient,
+    ):
 
-    if context.channel_id is None:
-        logger.error("Channel ID is None. Cannot fetch thread replies.")
-        say(":warning: Something went wrong! (Channel ID is missing)")
-        return
+        try:
+            # Note: assistant.thread_started doesn't reliably provide user context
+            # We'll personalize the greeting in the user_message handler instead
+            say("How can I help you?")
+        except Exception as e:
+            logger.exception(f"Failed to handle an assistant_thread_started event: {e}", e)
+            say(f":warning: Something went wrong! ({e})")
 
-    if context.thread_ts is None:
-        logger.error("Thread timestamp (thread_ts) is None. Cannot fetch thread replies.")
-        say(":warning: Something went wrong! (Thread timestamp is missing)")
-        return
+    # This listener is invoked when the human user sends a reply in the assistant thread
+    @assistant.user_message
+    def respond_in_assistant_thread(
+        logger: logging.Logger,
+        context: BoltContext,
+        set_status: SetStatus,
+        client: WebClient,
+        say: Say,
+    ):
+        if context.channel_id is None:
+            logger.error("Channel ID is None. Cannot fetch thread replies.")
+            say(":warning: Something went wrong! (Channel ID is missing)")
+            return
 
-    # Fetch all messages with pagination support
-    messages_in_thread: List[Dict[str, Any]] = []
-    all_messages: List[Dict[str, Any]] = []
-    cursor = None
+        if context.thread_ts is None:
+            logger.error("Thread timestamp (thread_ts) is None. Cannot fetch thread replies.")
+            say(":warning: Something went wrong! (Thread timestamp is missing)")
+            return
 
-    # Keep fetching until we have all messages
-    while True:
-        params = {
-            "channel": context.channel_id,
-            "ts": context.thread_ts,
-            "limit": 10,  # Max allowed per request
-        }
+        # Fetch all messages with pagination support
+        messages_in_thread: List[Dict[str, Any]] = []
+        all_messages: List[Dict[str, Any]] = []
+        cursor = None
 
-        # Add cursor for pagination if we have one
-        if cursor:
-            params["cursor"] = cursor
+        # Keep fetching until we have all messages
+        while True:
+            params = {
+                "channel": context.channel_id,
+                "ts": context.thread_ts,
+                "limit": 10,  # Max allowed per request
+            }
 
-        replies = client.conversations_replies(**params)
-        messages = replies.get("messages", [])
+            # Add cursor for pagination if we have one
+            if cursor:
+                params["cursor"] = cursor
 
-        if messages:
-            all_messages.extend(messages)
+            replies = client.conversations_replies(**params)
+            messages = replies.get("messages", [])
 
-        # Check if there are more messages to fetch
-        response_metadata = replies.get("response_metadata", {})
-        cursor = response_metadata.get("next_cursor")
+            if messages:
+                all_messages.extend(messages)
 
-        # Break if no more messages
-        if not cursor:
-            break
+            # Check if there are more messages to fetch
+            response_metadata = replies.get("response_metadata", {})
+            cursor = response_metadata.get("next_cursor")
 
-    # Sort messages by timestamp to ensure chronological order
-    # Slack's pagination may return pages in different order
-    all_messages.sort(key=lambda m: float(m.get("ts", 0)))
-    messages = all_messages
+            # Break if no more messages
+            if not cursor:
+                break
 
-    if not messages:
-        logger.error("No messages found in thread")
-        say(":warning: No messages found in this thread")
-        return
+        # Sort messages by timestamp to ensure chronological order
+        # Slack's pagination may return pages in different order
+        all_messages.sort(key=lambda m: float(m.get("ts", 0)))
+        messages = all_messages
 
-    for message in messages:
-        if message.get("bot_id") is None:
-            # User message - keep as is
-            messages_in_thread.append({"role": "user", "content": message["text"]})
-        else:
-            # Assistant message - parse to recover thinking blocks
-            # Get attachments if available
-            attachments = message.get("attachments", [])
-            parse_result = parse_assistant_message(message["text"], attachments)
+        if not messages:
+            logger.error("No messages found in thread")
+            say(":warning: No messages found in this thread")
+            return
 
-            # Handle the two possible return types
-            if isinstance(parse_result, tuple):
-                # We have tool uses and results
-                content_blocks, tool_results = parse_result
-                # Only add assistant message if it has content
-                if content_blocks:
-                    messages_in_thread.append({"role": "assistant", "content": content_blocks})
+        for message in messages:
+            if message.get("bot_id") is None:
+                # User message - keep as is
+                messages_in_thread.append({"role": "user", "content": message["text"]})
+            else:
+                # Assistant message - parse to recover thinking blocks
+                # Get attachments if available
+                attachments = message.get("attachments", [])
+                parse_result = parse_assistant_message(message["text"], attachments)
 
-                # Add tool results as a user message if we have them
-                if tool_results:
-                    tool_result_content = []
-                    for tool_result in tool_results:
-                        tool_result_content.append(
-                            {
-                                "type": "tool_result",
-                                "tool_use_id": tool_result["tool_use_id"],
-                                "content": tool_result["result"],
-                            }
-                        )
-                    messages_in_thread.append({"role": "user", "content": tool_result_content})
-            elif parse_result:  # Only add if not empty
-                # Regular assistant message without tool uses
-                messages_in_thread.append({"role": "assistant", "content": parse_result})
+                # Handle the two possible return types
+                if isinstance(parse_result, tuple):
+                    # We have tool uses and results
+                    content_blocks, tool_results = parse_result
+                    # Only add assistant message if it has content
+                    if content_blocks:
+                        messages_in_thread.append({"role": "assistant", "content": content_blocks})
 
-    try:
-        # Check if beast mode is enabled for this thread
-        if context.channel_id in thread_models and context.thread_ts in thread_models[context.channel_id]:
-            model_name = thread_models[context.channel_id][context.thread_ts]
-            llm.message(
-                set_status=set_status,
-                messages_in_thread=messages_in_thread,
-                say=say,
-                tool_registry=tool_registry,
-                model=model_name,
-            )
-        else:
-            # Use default model
-            llm.message(
-                set_status=set_status,
-                messages_in_thread=messages_in_thread,
-                say=say,
-                tool_registry=tool_registry,
-            )
-    except Exception as e:
-        logger.exception(f"Failed to handle a user message event: {e}")
-        say(f":warning: Something went wrong! ({e})")
+                    # Add tool results as a user message if we have them
+                    if tool_results:
+                        tool_result_content = []
+                        for tool_result in tool_results:
+                            tool_result_content.append(
+                                {
+                                    "type": "tool_result",
+                                    "tool_use_id": tool_result["tool_use_id"],
+                                    "content": tool_result["result"],
+                                }
+                            )
+                        messages_in_thread.append({"role": "user", "content": tool_result_content})
+                elif parse_result:  # Only add if not empty
+                    # Regular assistant message without tool uses
+                    messages_in_thread.append({"role": "assistant", "content": parse_result})
+
+        try:
+            # Check if beast mode is enabled for this thread
+            if context.channel_id in thread_models and context.thread_ts in thread_models[context.channel_id]:
+                model_name = thread_models[context.channel_id][context.thread_ts]
+                llm.message(
+                    set_status=set_status,
+                    messages_in_thread=messages_in_thread,
+                    say=say,
+                    tool_registry=tool_registry,
+                    model=model_name,
+                )
+            else:
+                # Use default model
+                llm.message(
+                    set_status=set_status,
+                    messages_in_thread=messages_in_thread,
+                    say=say,
+                    tool_registry=tool_registry,
+                )
+        except Exception as e:
+            logger.exception(f"Failed to handle a user message event: {e}")
+            say(f":warning: Something went wrong! ({e})")
+
+    return assistant
 
 
 # Slash command handler for /beast

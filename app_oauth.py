@@ -14,6 +14,7 @@ from slack_sdk.oauth.installation_store import FileInstallationStore
 from slack_sdk.oauth.state_store import FileOAuthStateStore
 
 from slack_hook import register
+from tools import ToolRegistry
 
 logging.basicConfig(level=logging.DEBUG)
 
@@ -55,8 +56,11 @@ app = App(
     ),
 )
 
+# Initialize ToolRegistry with Slack client
+tool_registry = ToolRegistry(slack_client=app.client)
+
 # Register Listeners
-register(app)
+register(app, tool_registry)
 
 # Start Bolt app
 if __name__ == "__main__":

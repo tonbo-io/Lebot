@@ -9,13 +9,17 @@ from slack_bolt import App
 from slack_bolt.adapter.socket_mode import SocketModeHandler
 
 from slack_hook import register
+from tools import ToolRegistry
 
 # Initialization
 logging.basicConfig(level=logging.DEBUG)
 app = App(token=os.environ.get("SLACK_BOT_TOKEN"))
 
+# Initialize ToolRegistry with Slack client
+tool_registry = ToolRegistry(slack_client=app.client)
+
 # Register Listeners
-register(app)
+register(app, tool_registry)
 
 # Start Bolt app
 if __name__ == "__main__":
