@@ -1,7 +1,6 @@
 import logging
-import re
 from typing import Any, List, Dict, Union, Optional
-from slack_bolt import Assistant, BoltContext, Say, SetStatus
+from slack_bolt import Assistant, BoltContext, Say, SetStatus, Ack
 from slack_sdk import WebClient
 
 from .llm import LLM
@@ -14,6 +13,10 @@ assistant = Assistant()
 llm = LLM()
 # Tool registry will be initialized later with WebClient
 tool_registry = None
+
+# Thread model preferences - stores model choice per thread
+# Format: {channel_id: {thread_ts: "model_name"}}
+thread_models: Dict[str, Dict[str, str]] = {}
 
 
 def parse_assistant_message(
@@ -285,12 +288,99 @@ def respond_in_assistant_thread(
                 messages_in_thread.append({"role": "assistant", "content": parse_result})
 
     try:
-        llm.message(
-            set_status=set_status,
-            messages_in_thread=messages_in_thread,
-            say=say,
-            tool_registry=tool_registry,
-        )
+        # Check if beast mode is enabled for this thread
+        if context.channel_id in thread_models and context.thread_ts in thread_models[context.channel_id]:
+            model_name = thread_models[context.channel_id][context.thread_ts]
+            llm.message(
+                set_status=set_status,
+                messages_in_thread=messages_in_thread,
+                say=say,
+                tool_registry=tool_registry,
+                model=model_name,
+            )
+        else:
+            # Use default model
+            llm.message(
+                set_status=set_status,
+                messages_in_thread=messages_in_thread,
+                say=say,
+                tool_registry=tool_registry,
+            )
     except Exception as e:
         logger.exception(f"Failed to handle a user message event: {e}")
         say(f":warning: Something went wrong! ({e})")
+
+
+# Slash command handler for /beast
+def handle_beast_command(ack: Ack, command: Dict[str, Any], client: WebClient, logger: logging.Logger):
+    """Handle the /beast slash command to enable Claude Opus 4 for a thread."""
+    ack()  # Acknowledge the command immediately
+
+    channel_id = command.get("channel_id")
+    thread_ts = command.get("thread_ts")
+    user_id = command.get("user_id")
+
+    # Validate required fields
+    if not channel_id or not user_id:
+        logger.error("Missing channel_id or user_id in command")
+        return
+
+    # If not in a thread, inform the user
+    if not thread_ts:
+        client.chat_postEphemeral(
+            channel=channel_id,
+            user=user_id,
+            text=":warning: Please use `/beast` within a thread to enable beast mode for that conversation.",
+        )
+        return
+
+    # Store the model preference for this thread
+    if channel_id not in thread_models:
+        thread_models[channel_id] = {}
+
+    thread_models[channel_id][thread_ts] = "claude-opus-4-20250514"
+
+    # Confirm to the user
+    client.chat_postMessage(
+        channel=channel_id,
+        thread_ts=thread_ts,
+        text=":zap: *Beast Mode Activated!* :zap:\nThis thread is now using Claude Opus 4 for maximum intelligence and capability.",
+    )
+
+    logger.info(f"Beast mode enabled for thread {thread_ts} in channel {channel_id} by user {user_id}")
+
+
+# Slash command handler for /normal
+def handle_normal_command(ack: Ack, command: Dict[str, Any], client: WebClient, logger: logging.Logger):
+    """Handle the /normal slash command to switch back to Claude Sonnet 4."""
+    ack()  # Acknowledge the command immediately
+
+    channel_id = command.get("channel_id")
+    thread_ts = command.get("thread_ts")
+    user_id = command.get("user_id")
+
+    # Validate required fields
+    if not channel_id or not user_id:
+        logger.error("Missing channel_id or user_id in command")
+        return
+
+    # If not in a thread, inform the user
+    if not thread_ts:
+        client.chat_postEphemeral(
+            channel=channel_id,
+            user=user_id,
+            text=":warning: Please use `/normal` within a thread to switch back to normal mode for that conversation.",
+        )
+        return
+
+    # Remove the model preference for this thread (revert to default)
+    if channel_id in thread_models and thread_ts in thread_models[channel_id]:
+        del thread_models[channel_id][thread_ts]
+        message = ":white_check_mark: Switched back to normal mode (Claude Sonnet 4)."
+    else:
+        message = ":information_source: This thread is already using normal mode (Claude Sonnet 4)."
+
+    # Confirm to the user
+    client.chat_postMessage(channel=channel_id, thread_ts=thread_ts, text=message)
+
+    logger.info(f"Normal mode restored for thread {thread_ts} in channel {channel_id} by user {user_id}")

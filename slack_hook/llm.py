@@ -20,7 +20,8 @@ When a prompt has Slack's special syntax like <@USER_ID> or <#CHANNEL_ID>, you m
 
     @classmethod
     def _load_system_prompt(cls) -> str:
-        """Load system prompt from prompts/system.md if available."""
+        """Load system prompt from prompts/system.md if available and append today's date info."""
+        base_prompt = ""
         try:
             # Get the project root directory (parent of slack_hook)
             current_dir = Path(__file__).parent
@@ -34,11 +35,20 @@ When a prompt has Slack's special syntax like <@USER_ID> or <#CHANNEL_ID>, you m
                     lines = content.split("\n")
                     if lines and lines[0].startswith("#"):
                         lines = lines[1:]
-                    return "\n".join(lines).strip()
+                    base_prompt = "\n".join(lines).strip()
+            else:
+                base_prompt = cls.DEFAULT_SYSTEM_CONTENT
         except Exception as e:
             print(f"Warning: Could not load system.md: {e}")
+            base_prompt = cls.DEFAULT_SYSTEM_CONTENT
 
-        return cls.DEFAULT_SYSTEM_CONTENT
+        # Append current date and time information
+        import datetime
+
+        now = datetime.datetime.now().astimezone()
+        date_info = f"\n\n**Current context**: {now.strftime('%A')}, {str(now)} ({str(now.tzinfo)})"
+
+        return base_prompt + date_info
 
     def __init__(self, api_key: Optional[str] = None):
         if api_key is None:
@@ -126,6 +136,7 @@ When a prompt has Slack's special syntax like <@USER_ID> or <#CHANNEL_ID>, you m
         tools: Optional[List[Dict[str, Any]]] = None,
         system_content: Optional[str] = None,
         thinking_budget: int = 16384,  # Default budget for thinking mode
+        model: str = "claude-sonnet-4-20250514",  # Model to use (default: Sonnet 4)
     ) -> None:
         """Send messages with interleaved thinking mode and optional tools.
 
@@ -136,7 +147,8 @@ When a prompt has Slack's special syntax like <@USER_ID> or <#CHANNEL_ID>, you m
             tools: Optional list of tool definitions
             tool_registry: Tool registry for executing tools
             system_content: Optional system prompt
-            thinking_budget: Token budget for thinking (default 8000)
+            thinking_budget: Token budget for thinking (default 16384)
+            model: Model to use (default: claude-sonnet-4-20250514, can be claude-opus-4-20250514)
         """
         if system_content is None:
             system_content = self._load_system_prompt()
@@ -159,7 +171,7 @@ When a prompt has Slack's special syntax like <@USER_ID> or <#CHANNEL_ID>, you m
         request_params = {
             "max_tokens": 16384,
             "messages": messages,
-            "model": "claude-sonnet-4-20250514",
+            "model": model,
             "system": system_content,
             "tools": tools_list,
             "extra_headers": {"anthropic-beta": "interleaved-thinking-2025-05-14"},
@@ -225,7 +237,7 @@ When a prompt has Slack's special syntax like <@USER_ID> or <#CHANNEL_ID>, you m
         """Convert markdown to Slack-compatible mrkdwn format."""
         # First convert headers to bold text
         content = re.sub(r"^#{1,6}\s+(.+)$", r"*\1*", content, flags=re.MULTILINE)
-        
+
         # Split the input string into parts based on code blocks and inline code
         parts = re.split(r"(?s)(```.+?```|`[^`\n]+?`)", content)
 
@@ -238,19 +250,19 @@ When a prompt has Slack's special syntax like <@USER_ID> or <#CHANNEL_ID>, you m
                 # Process formatting - order matters to avoid conflicts!
                 # 1. Bold-italic (***) first - most specific pattern
                 part = re.sub(r"\*\*\*(.+?)\*\*\*", r"_*\1*_", part)
-                
+
                 # 2. Italic (*) BEFORE bold (**) to avoid confusion after conversion
                 # Match single asterisks that are not adjacent to other asterisks
                 part = re.sub(r"(?<![*])\*([^*\n]+?)\*(?![*])", r"_\1_", part)
-                
+
                 # 3. Bold (**) - now safe to convert without affecting italic
                 part = re.sub(r"\*\*(.+?)\*\*", r"*\1*", part)
-                
-                # 4. Alternative bold (__) 
+
+                # 4. Alternative bold (__)
                 part = re.sub(r"__(.+?)__", r"*\1*", part)
-                
+
                 # 5. Strikethrough (~~)
                 part = re.sub(r"~~(.+?)~~", r"~\1~", part)
-                
+
                 result += part
         return result
