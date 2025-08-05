@@ -10,19 +10,21 @@ Key features:
 - **Slack Assistant Integration**: Uses Slack's native Assistant API for seamless user interactions
 - **Claude API Integration**: Powered by Claude Sonnet 4 for intelligent responses
 - **Tool Integration**: Extensible architecture supporting tools like Linear API for project management
-- **OAuth Support**: Supports both Socket Mode and OAuth installation flows
+- **Socket Mode**: Uses Socket Mode for real-time event handling
 
 The architecture follows: **User ↔ Slack Assistant ↔ LLM (Claude) ↔ Tools**
 
 ## Key Architecture Components
 
 ### Core Application Structure
-- **`app.py`**: Main entry point for Socket Mode - initializes Slack Bolt app with Socket Mode handler
-- **`app_oauth.py`**: Alternative entry point for OAuth flow - includes installation store and OAuth settings
+- **`app.py`**: Main entry point - initializes async Slack Bolt app with Socket Mode handler
 - **`slack_hook/`**: Main module containing Slack event handlers and LLM integration
-  - **`__init__.py`**: Registers the assistant with the Slack app
-  - **`assistant.py`**: Implements Slack Assistant event handlers using decorators
-  - **`llm.py`**: LLM integration layer with Claude API and markdown-to-Slack formatting
+  - **`__init__.py`**: Entry point that imports the hook registration function
+  - **`assistant.py`**: Implements async Slack Assistant event handlers using decorators
+  - **`claude.py`**: AsyncClaude class for Claude API integration with cancellation support
+  - **`hook.py`**: Main async hook registration for Slack app with conversation management
+  - **`conversation_manager.py`**: Manages conversation state and thread contexts
+  - **`message_parser.py`**: Parses assistant messages to extract thinking blocks and tool uses
 
 ### Tools and Integrations
 - **`tools/`**: Core tools and libraries for bot functionality
@@ -67,19 +69,9 @@ Create a `.env` file based on `.env.example`:
 cp .env.example .env
 ```
 
-#### For Socket Mode (app.py):
 ```bash
 SLACK_BOT_TOKEN=xoxb-your-bot-token
 SLACK_APP_TOKEN=xapp-your-app-token
-ANTHROPIC_API_KEY=sk-ant-api03-your-api-key
-LINEAR_OAUTH_KEY=lin_api_your_key  # Optional: for Linear integration
-```
-
-#### For OAuth Mode (app_oauth.py):
-```bash
-SLACK_CLIENT_ID=your-client-id
-SLACK_CLIENT_SECRET=your-client-secret
-SLACK_SIGNING_SECRET=your-signing-secret
 ANTHROPIC_API_KEY=sk-ant-api03-your-api-key
 LINEAR_OAUTH_KEY=lin_api_your_key  # Optional: for Linear integration
 ```
@@ -119,8 +111,15 @@ When working with Claude Code in VS Code, the following MCP (Model Context Proto
   - Assistant feature with custom description
   - Required OAuth scopes: `assistant:write`, `channels:join`, `im:history`, `channels:history`, `groups:history`, `chat:write`
   - Event subscriptions: `assistant_thread_started`, `assistant_thread_context_changed`, `message.im`
-  - Socket Mode enabled by default (can use OAuth mode with `app_oauth.py`)
+  - Socket Mode enabled for real-time event handling
   - Interactivity enabled for button actions
+
+### Async Architecture
+The entire application now uses async/await patterns:
+- **AsyncApp**: Slack Bolt's async application for better performance
+- **AsyncClaude**: Custom Claude client with cancellation support for long-running requests
+- **Async Handlers**: All event handlers use async/await for non-blocking operations
+- **Conversation Manager**: Async conversation state management with proper cleanup
 
 ### Message Flow
 1. User opens a new assistant thread or sends a message
@@ -140,7 +139,7 @@ When working with Claude Code in VS Code, the following MCP (Model Context Proto
 7. If tools were used, the system automatically:
    - Sends tool results back to Claude
    - Processes any additional tool uses in follow-up responses
-   - Continues until no more tools are needed (max 10 rounds)
+   - Continues until no more tools are needed (with emergency stop button for safety)
 8. Bot posts all responses back to the thread in real-time
 
 ### Code Formatting Configuration
@@ -217,8 +216,7 @@ result = linear.query(custom_query)
 - **Tool Results**: Auto-collapse in Slack when >700 chars or >5 lines
 
 ## Tool Architecture
-- **Core Tools** (`tools/`): GraphQL client infrastructure
-- **Scripts** (`scripts/`): Standalone executables for Linear analysis
+- **Core Tools** (`tools/`): GraphQL client infrastructure and Linear API integration
 
 ## Future Architecture: Claude Code Integration
 

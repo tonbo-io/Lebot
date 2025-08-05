@@ -1,9 +1,11 @@
 import logging
-from typing import Dict, Any, Optional, List
+import asyncio
+from typing import Dict, Any, List
 
 from .graphql import GraphQLClient, LinearClient
 from .bash import Bash
 from .slack import Slack
+from .linear import Linear
 
 
 class ToolRegistry:
@@ -31,6 +33,13 @@ class ToolRegistry:
             self.logger.info("Initialized tool registry with bash and slack tools")
         else:
             self.logger.info("Initialized tool registry with bash tool (no slack client provided)")
+
+        # Initialize linear tool
+        try:
+            self.tools["linear"] = Linear()
+            self.logger.info("Initialized Linear tool")
+        except Exception as e:
+            self.logger.warning(f"Failed to initialize Linear tool: {e}")
 
     def execute_tool(self, tool_name: str, tool_input: Dict[str, Any]) -> str:
         """Execute a tool with the given input.
@@ -124,8 +133,114 @@ class ToolRegistry:
                 # Default formatting
                 return str(result)
 
+            elif tool_name == "linear":
+                # Extract linear tool parameters
+                operation = tool_input.get("operation")
+                params = tool_input.get("params", {})
+
+                if not operation:
+                    return "Error: No operation specified"
+
+                # Execute the linear operation
+                result = self.tools["linear"].execute(operation=operation, params=params)
+
+                # Format the output
+                if "error" in result:
+                    return f"**Error:** {result['error']}"
+
+                # Return the formatted report
+                if "report" in result:
+                    return result["report"]
+
+                # Default formatting for unexpected responses
+                return str(result)
+
             # Default case for other tools
             return f"Tool {tool_name} not implemented"
+
+        except Exception as e:
+            error_msg = f"Failed to execute tool {tool_name}: {e}"
+            self.logger.exception(error_msg)
+            return f"Error: {error_msg}"
+
+    async def async_execute_tool(self, tool_name: str, tool_input: Dict[str, Any]) -> str:
+        """Execute a tool asynchronously with the given input.
+
+        Args:
+            tool_name: Name of the tool to execute
+            tool_input: Input parameters for the tool
+
+        Returns:
+            String representation of the tool output
+        """
+        if tool_name not in self.tools:
+            error_msg = f"Unknown tool: {tool_name}"
+            self.logger.error(error_msg)
+            return f"Error: {error_msg}"
+
+        try:
+            tool = self.tools[tool_name]
+
+            # Check if the tool has an async execute method
+            if hasattr(tool, "async_execute"):
+                # Use the async execute method
+                if tool_name == "slack":
+                    operation = tool_input.get("operation")
+                    params = tool_input.get("params", {})
+                    if not operation:
+                        return "Error: No operation specified"
+                    result = await tool.async_execute(operation=operation, params=params)
+                else:
+                    # For other tools with async_execute
+                    result = await tool.async_execute(**tool_input)
+            else:
+                # Fall back to sync execution in thread pool
+                loop = asyncio.get_event_loop()
+                result = await loop.run_in_executor(None, self.execute_tool, tool_name, tool_input)
+                return result
+
+            # Handle tool-specific formatting (same as execute_tool)
+            if tool_name == "slack":
+                # Format the output
+                if "error" in result:
+                    return f"**Error:** {result['error']}"
+
+                # Format based on operation type
+                operation = tool_input.get("operation")
+                if operation == "list_channels":
+                    channels = result.get("channels", [])
+                    output = f"Found {result.get('count', 0)} channels:\n\n"
+                    for ch in channels[:20]:  # Limit to 20 for readability
+                        output += f"• **{ch['name']}** (ID: {ch['id']})\n"
+                        if ch.get("topic"):
+                            output += f"  Topic: {ch['topic']}\n"
+                    if len(channels) > 20:
+                        output += f"\n... and {len(channels) - 20} more"
+                    return output
+
+                elif operation == "send_message":
+                    return f"Message sent successfully to {result.get('channel', 'unknown')} (ts: {result.get('ts', '')})"
+
+                elif operation in ["lookup_user", "get_user_info"]:
+                    return (
+                        f"**User:** {result.get('real_name', 'Unknown')} (@{result.get('name', '')})\n"
+                        f"**Email:** {result.get('email', 'N/A')}\n"
+                        f"**ID:** {result.get('id', 'N/A')}"
+                    )
+
+                elif operation == "get_channel_info":
+                    return (
+                        f"**Channel:** {result.get('name', 'Unknown')} (ID: {result.get('id', '')})\n"
+                        f"**Private:** {result.get('is_private', False)}\n"
+                        f"**Members:** {result.get('num_members', 0)}\n"
+                        f"**Topic:** {result.get('topic', 'None')}"
+                    )
+
+                # Default formatting
+                return str(result)
+
+            # For other async tools, return formatted result
+            return str(result)
 
         except Exception as e:
             error_msg = f"Failed to execute tool {tool_name}: {e}"
@@ -141,6 +256,10 @@ class ToolRegistry:
         tools = {"bash": "Execute bash commands with persistent session"}
         if "slack" in self.tools:
             tools["slack"] = "Interact with Slack workspace - list channels, send messages, lookup users"
+        if "linear" in self.tools:
+            tools["linear"] = (
+                "Interact with Linear for project management - track activity, find inactive assignees, get project overviews"
+            )
         return tools
 
     def get_tool_schemas(self) -> List[Dict[str, Any]]:
@@ -156,4 +275,4 @@ class ToolRegistry:
         return schemas
 
 
-__all__ = ["GraphQLClient", "LinearClient", "Bash", "Slack", "ToolRegistry"]
+__all__ = ["GraphQLClient", "LinearClient", "Bash", "Slack", "Linear", "ToolRegistry"]

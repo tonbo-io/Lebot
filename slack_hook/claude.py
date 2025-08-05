@@ -1,15 +1,20 @@
+"""Async version of Claude LLM integration with cancellation support."""
+
 import os
 import re
 import time
-from typing import List, Dict, Any, Optional
+import asyncio
+from typing import List, Dict, Any, Optional, Callable
 from pathlib import Path
 
-from anthropic import Anthropic
+from anthropic import AsyncAnthropic
 from anthropic.types import TextBlock, ToolUseBlock, ThinkingBlock
-from slack_bolt import SetStatus
+from slack_bolt.context.set_status.async_set_status import AsyncSetStatus
 
 
-class Claude:
+class AsyncClaude:
+    """Async Claude client with cancellation support."""
+
     # Try to load system prompt from CLAUDE.md, fallback to default
     DEFAULT_SYSTEM_CONTENT = """
 You're an assistant in a Slack workspace.
@@ -55,16 +60,24 @@ When a prompt has Slack's special syntax like <@USER_ID> or <#CHANNEL_ID>, you m
             api_key = os.getenv("ANTHROPIC_API_KEY")
         if not api_key:
             raise ValueError("ANTHROPIC_API_KEY environment variable is required")
-        self.client = Anthropic(api_key=api_key)
+        self.client = AsyncAnthropic(api_key=api_key)
 
-    def _process_response_content(
+    async def _process_response_content(
         self,
         response: Any,
         say: Any,
-        set_status: SetStatus,
+        set_status: AsyncSetStatus,
         tool_registry: Any,
+        cancel_check: Optional[Callable[[], bool]] = None,
     ) -> List[Dict[str, Any]]:
         """Process response content, execute tools, and return tool uses.
+
+        Args:
+            response: Claude API response
+            say: Slack say function
+            set_status: Status setter
+            tool_registry: Tool registry for execution
+            cancel_check: Optional function to check if cancelled
 
         Returns:
             List of tool uses with their results
@@ -72,6 +85,10 @@ When a prompt has Slack's special syntax like <@USER_ID> or <#CHANNEL_ID>, you m
         tool_uses = []
 
         for content in response.content:
+            # Check for cancellation
+            if cancel_check and cancel_check():
+                raise asyncio.CancelledError("Processing cancelled")
+
             if isinstance(content, ThinkingBlock):
                 # Format thinking content as quoted text
                 thinking_text = content.thinking
@@ -79,8 +96,7 @@ When a prompt has Slack's special syntax like <@USER_ID> or <#CHANNEL_ID>, you m
                 quoted_text = "\n".join(quoted_lines)
 
                 # Send thinking as plain quoted text
-                # Store signature in attachment metadata for cleaner appearance
-                say(
+                await say(
                     text=quoted_text,
                     attachments=[
                         {
@@ -93,12 +109,20 @@ When a prompt has Slack's special syntax like <@USER_ID> or <#CHANNEL_ID>, you m
                 )
             elif isinstance(content, TextBlock):
                 # Convert and send each text block immediately
-                formatted_text = Claude.markdown_to_slack(content.text)
-                say(formatted_text)
+                formatted_text = self.markdown_to_slack(content.text)
+                await say(formatted_text)
             elif isinstance(content, ToolUseBlock):
                 # Execute the tool
-                set_status(f"using {content.name}...")
-                tool_result = tool_registry.execute_tool(content.name, content.input)
+                await set_status(f"using {content.name}...")
+
+                # Execute tool (assuming tool registry has async support)
+                if hasattr(tool_registry, "async_execute_tool"):
+                    tool_result = await tool_registry.async_execute_tool(content.name, content.input)
+                else:
+                    # Fallback to sync execution in thread pool
+                    tool_result = await asyncio.get_event_loop().run_in_executor(
+                        None, tool_registry.execute_tool, content.name, content.input
+                    )
 
                 # Store tool use for potential follow-up
                 tool_uses.append(
@@ -106,13 +130,13 @@ When a prompt has Slack's special syntax like <@USER_ID> or <#CHANNEL_ID>, you m
                 )
 
                 # Show tool usage in Slack using attachments for auto-collapse
-                formatted_result = Claude.markdown_to_slack(tool_result)
+                formatted_result = self.markdown_to_slack(tool_result)
 
                 # Determine color based on tool result (simple heuristic)
                 color = "#ff0000" if "error" in tool_result.lower() else "#2eb886"
 
                 # Use attachment for tool results - auto-collapses if >700 chars or >5 lines
-                say(
+                await say(
                     text=f"*Tool: {content.name}*",  # Fallback for notifications
                     attachments=[
                         {
@@ -127,16 +151,17 @@ When a prompt has Slack's special syntax like <@USER_ID> or <#CHANNEL_ID>, you m
 
         return tool_uses
 
-    def message(
+    async def async_message(
         self,
-        set_status: SetStatus,
+        set_status: AsyncSetStatus,
         messages_in_thread: List[Dict[str, Any]],
         say: Any,
         tool_registry: Any,
         tools: Optional[List[Dict[str, Any]]] = None,
         system_content: Optional[str] = None,
-        thinking_budget: int = 8192,  # Default budget for thinking mode
-        model: str = "claude-sonnet-4-20250514",  # Model to use (default: Sonnet 4)
+        thinking_budget: int = 8192,
+        model: str = "claude-sonnet-4-20250514",
+        cancel_check: Optional[Callable[[], bool]] = None,
     ) -> None:
         """Send messages with interleaved thinking mode and optional tools.
 
@@ -147,13 +172,14 @@ When a prompt has Slack's special syntax like <@USER_ID> or <#CHANNEL_ID>, you m
             tools: Optional list of tool definitions
             tool_registry: Tool registry for executing tools
             system_content: Optional system prompt
-            thinking_budget: Token budget for thinking (default 16384)
-            model: Model to use (default: claude-sonnet-4-20250514, can be claude-opus-4-20250514)
+            thinking_budget: Token budget for thinking
+            model: Model to use
+            cancel_check: Optional function to check if cancelled
         """
         if system_content is None:
             system_content = self._load_system_prompt()
 
-        set_status("is thinking...")
+        await set_status("is thinking...")
 
         messages = []
         messages.extend(messages_in_thread)
@@ -178,38 +204,51 @@ When a prompt has Slack's special syntax like <@USER_ID> or <#CHANNEL_ID>, you m
             "thinking": {"type": "enabled", "budget_tokens": thinking_budget},
         }
 
+        # Check for cancellation before API call
+        if cancel_check and cancel_check():
+            raise asyncio.CancelledError("Request cancelled before API call")
+
         # Initial response
-        response = self.client.messages.create(**request_params)
+        response = await self.client.messages.create(**request_params)
 
         if len(response.content) < 1:
-            say("I'm distracted.")
+            await say("I'm distracted.")
             return
 
         # Process initial response
-        tool_uses = self._process_response_content(response, say, set_status, tool_registry)
+        tool_uses = await self._process_response_content(response, say, set_status, tool_registry, cancel_check)
 
         # Continue processing while there are tool uses
-        max_tool_rounds = 10  # Prevent infinite loops
         tool_round = 0
 
-        while tool_uses and tool_round < max_tool_rounds:
+        while tool_uses:
+            # Check for cancellation
+            if cancel_check and cancel_check():
+                raise asyncio.CancelledError("Request cancelled during tool processing")
+
             tool_round += 1
-            set_status(f"processing tool results (round {tool_round})...")
+            await set_status(f"processing tool results (round {tool_round})...")
 
             # Add assistant message with all content to conversation
-            assistant_content = []
+            # First, collect all content blocks by type
+            thinking_blocks = []
+            text_blocks = []
+            tool_use_blocks = []
+
             for content in response.content:
                 if isinstance(content, ThinkingBlock):
-                    assistant_content.append(
+                    thinking_blocks.append(
                         {"type": "thinking", "thinking": content.thinking, "signature": content.signature}
                     )
                 elif isinstance(content, TextBlock):
-                    assistant_content.append({"type": "text", "text": content.text})
+                    text_blocks.append({"type": "text", "text": content.text})
                 elif isinstance(content, ToolUseBlock):
-                    assistant_content.append(
+                    tool_use_blocks.append(
                         {"type": "tool_use", "id": content.id, "name": content.name, "input": content.input}
                     )
 
+            # Construct assistant content with thinking blocks first (required for thinking mode)
+            assistant_content = thinking_blocks + text_blocks + tool_use_blocks
             messages.append({"role": "assistant", "content": assistant_content})
 
             # Add tool results as user message
@@ -222,15 +261,32 @@ When a prompt has Slack's special syntax like <@USER_ID> or <#CHANNEL_ID>, you m
 
             # Get Claude's follow-up response
             follow_up_params = request_params.copy()
-            follow_up_params["messages"] = messages
+            # Create a fresh copy of messages to ensure proper structure
+            follow_up_messages = []
+            for msg in messages:
+                if msg["role"] == "assistant" and isinstance(msg.get("content"), list):
+                    # Ensure assistant messages have proper structure for thinking mode
+                    # Reorder content to have thinking blocks first
+                    content = msg["content"]
+                    thinking_blocks = [block for block in content if block.get("type") == "thinking"]
+                    text_blocks = [block for block in content if block.get("type") == "text"]
+                    tool_use_blocks = [block for block in content if block.get("type") == "tool_use"]
 
-            response = self.client.messages.create(**follow_up_params)
+                    # Only reorder if we have content blocks
+                    if thinking_blocks or text_blocks or tool_use_blocks:
+                        reordered_content = thinking_blocks + text_blocks + tool_use_blocks
+                        follow_up_messages.append({"role": msg["role"], "content": reordered_content})
+                    else:
+                        follow_up_messages.append(msg)
+                else:
+                    follow_up_messages.append(msg)
+
+            follow_up_params["messages"] = follow_up_messages
+
+            response = await self.client.messages.create(**follow_up_params)
 
             # Process follow-up response and check for more tool uses
-            tool_uses = self._process_response_content(response, say, set_status, tool_registry)
-
-        if tool_round >= max_tool_rounds and tool_uses:
-            say(":warning: Reached maximum tool execution rounds. Some tools may not have been executed.")
+            tool_uses = await self._process_response_content(response, say, set_status, tool_registry, cancel_check)
 
     @staticmethod
     def markdown_to_slack(content: str) -> str:

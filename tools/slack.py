@@ -1,6 +1,7 @@
 import logging
-from typing import Dict, Any
+from typing import Dict, Any, Union
 from slack_sdk import WebClient
+from slack_sdk.web.async_client import AsyncWebClient
 from slack_sdk.errors import SlackApiError
 from .base import Tool
 
@@ -8,13 +9,14 @@ from .base import Tool
 class Slack(Tool):
     """Unified Slack tool for workspace interactions."""
 
-    def __init__(self, client: WebClient):
+    def __init__(self, client: Union[WebClient, AsyncWebClient]):
         """Initialize the Slack tool with a WebClient instance.
 
         Args:
-            client: Slack WebClient instance
+            client: Slack WebClient or AsyncWebClient instance
         """
         self.client = client
+        self.is_async = isinstance(client, AsyncWebClient)
         self.logger = logging.getLogger(__name__)
 
     def get_schema(self) -> Dict[str, Any]:
@@ -61,6 +63,35 @@ class Slack(Tool):
             },
         }
 
+    def _call_api(self, method, **kwargs):
+        """Call a Slack API method for synchronous clients.
+
+        Args:
+            method: The API method name (e.g., 'users_info')
+            **kwargs: Arguments to pass to the method
+
+        Returns:
+            The API response
+        """
+        if self.is_async:
+            raise RuntimeError("Cannot use sync _call_api with async client. Use async_execute instead.")
+
+        api_method = getattr(self.client, method)
+        return api_method(**kwargs)
+
+    async def _async_call_api(self, method, **kwargs):
+        """Call a Slack API method for asynchronous clients.
+
+        Args:
+            method: The API method name (e.g., 'users_info')
+            **kwargs: Arguments to pass to the method
+
+        Returns:
+            The API response
+        """
+        api_method = getattr(self.client, method)
+        return await api_method(**kwargs)
+
     def execute(self, **kwargs) -> Dict[str, Any]:
         """Execute a Slack operation based on the operation name.
 
@@ -94,6 +125,43 @@ class Slack(Tool):
             self.logger.exception(f"Failed to execute Slack operation {operation}: {e}")
             return {"error": f"Failed to execute operation: {str(e)}"}
 
+    async def async_execute(self, **kwargs) -> Dict[str, Any]:
+        """Execute a Slack operation asynchronously.
+
+        Args:
+            **kwargs: Keyword arguments:
+                - operation (str): The operation to perform
+                - params (Dict[str, Any]): Parameters for the operation
+
+        Returns:
+            Dict with the operation result
+        """
+        if not self.is_async:
+            # Fall back to sync execution
+            return self.execute(**kwargs)
+
+        operation = kwargs.get("operation", "")
+        params = kwargs.get("params", {})
+        operations = {
+            "list_channels": self._async_list_channels,
+            "get_channel_info": self._async_get_channel_info,
+            "send_message": self._async_send_message,
+            "lookup_user": self._async_lookup_user,
+            "get_user_info": self._async_get_user_info,
+        }
+
+        if operation not in operations:
+            return {"error": f"Unknown operation: {operation}"}
+
+        try:
+            return await operations[operation](params)
+        except SlackApiError as e:
+            self.logger.error(f"Slack API error: {e}")
+            return {"error": f"Slack API error: {e.response['error']}"}
+        except Exception as e:
+            self.logger.exception(f"Failed to execute Slack operation {operation}: {e}")
+            return {"error": f"Failed to execute operation: {str(e)}"}
+
     def _list_channels(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """List channels in the workspace.
 
@@ -114,7 +182,8 @@ class Slack(Tool):
             if include_private:
                 types = "public_channel,private_channel"
 
-            response = self.client.conversations_list(
+            response = self._call_api(
+                "conversations_list",
                 types=types,
                 exclude_archived=True,
                 limit=1000,
@@ -161,7 +230,7 @@ class Slack(Tool):
             return {"error": "channel_id is required"}
 
         try:
-            response = self.client.conversations_info(channel=channel_id)
+            response = self._call_api("conversations_info", channel=channel_id)
             if not response:
                 return {"error": "Failed to get channel info"}
 
@@ -227,7 +296,7 @@ class Slack(Tool):
                 if channel.startswith("#"):
                     channel = channel[1:]
                 # Try to find the channel
-                channels_response = self.client.conversations_list(types="public_channel,private_channel")
+                channels_response = self._call_api("conversations_list", types="public_channel,private_channel")
                 for ch in channels_response.get("channels", []):
                     if ch["name"] == channel or ch["id"] == channel:
                         target = ch["id"]
@@ -239,7 +308,7 @@ class Slack(Tool):
                 # Look up user by email or ID
                 if "@" in user:
                     # It's an email
-                    users_response = self.client.users_lookupByEmail(email=user)
+                    users_response = self._call_api("users_lookupByEmail", email=user)
                     if users_response and "user" in users_response:
                         user_data = users_response["user"]
                         if user_data:
@@ -251,7 +320,7 @@ class Slack(Tool):
                         target = user
                     else:
                         # Try to find by display name
-                        users_response = self.client.users_list()
+                        users_response = self._call_api("users_list")
                         for u in users_response.get("members", []):
                             if u.get("real_name", "").lower() == user.lower() or u.get("name", "").lower() == user.lower():
                                 target = u["id"]
@@ -261,7 +330,7 @@ class Slack(Tool):
 
                 # For DMs, we need to open a conversation first
                 if target:
-                    dm_response = self.client.conversations_open(users=target)
+                    dm_response = self._call_api("conversations_open", users=target)
                     if dm_response and "channel" in dm_response:
                         channel_data = dm_response["channel"]
                         if channel_data:
@@ -270,7 +339,7 @@ class Slack(Tool):
             # Send the message
             if not target:
                 return {"error": "Could not determine target channel or user"}
-            response = self.client.chat_postMessage(channel=target, text=text, thread_ts=thread_ts)
+            response = self._call_api("chat_postMessage", channel=target, text=text, thread_ts=thread_ts)
 
             return {
                 "ok": response["ok"],
@@ -302,7 +371,7 @@ class Slack(Tool):
         try:
             if email:
                 # Direct lookup by email
-                response = self.client.users_lookupByEmail(email=email)
+                response = self._call_api("users_lookupByEmail", email=email)
                 if response and "user" in response:
                     user = response["user"]
                     if user:
@@ -311,7 +380,7 @@ class Slack(Tool):
 
             else:
                 # Search by name
-                response = self.client.users_list()
+                response = self._call_api("users_list")
                 for user in response.get("members", []):
                     if user.get("deleted", False) or user.get("is_bot", False):
                         continue
@@ -343,7 +412,8 @@ class Slack(Tool):
             return {"error": "user_id is required"}
 
         try:
-            response = self.client.users_info(user=user_id)
+            response = self._call_api("users_info", user=user_id)
+
             if response and "user" in response:
                 user = response["user"]
                 if user:
@@ -376,3 +446,168 @@ class Slack(Tool):
             "status_emoji": profile.get("status_emoji", ""),
             "tz": user.get("tz", ""),
         }
+
+    # Async versions of the methods
+    async def _async_list_channels(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Async version of _list_channels."""
+        include_private = params.get("include_private", False)
+        pattern = params.get("pattern", None)
+
+        types = "public_channel"
+        if include_private:
+            types = "public_channel,private_channel"
+
+        try:
+            response = await self._async_call_api("conversations_list", exclude_archived=True, types=types, limit=1000)
+
+            channels = []
+            for channel in response.get("channels", []):
+                if pattern and pattern.lower() not in channel["name"].lower():
+                    continue
+                channels.append(
+                    {"id": channel["id"], "name": channel["name"], "topic": channel.get("topic", {}).get("value", "")}
+                )
+
+            return {"channels": channels, "count": len(channels)}
+
+        except SlackApiError:
+            raise
+
+    async def _async_get_channel_info(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Async version of _get_channel_info."""
+        channel_id = params.get("channel_id")
+        if not channel_id:
+            return {"error": "channel_id is required"}
+
+        try:
+            response = await self._async_call_api("conversations_info", channel=channel_id)
+            if response and "channel" in response:
+                channel = response["channel"]
+                return {
+                    "id": channel["id"],
+                    "name": channel.get("name", ""),
+                    "is_private": channel.get("is_private", False),
+                    "topic": channel.get("topic", {}).get("value", ""),
+                    "purpose": channel.get("purpose", {}).get("value", ""),
+                    "num_members": channel.get("num_members", 0),
+                }
+            return {"error": "Channel not found"}
+
+        except SlackApiError:
+            raise
+
+    async def _async_send_message(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Async version of _send_message."""
+        channel = params.get("channel")
+        user = params.get("user")
+        text = params.get("text")
+        thread_ts = params.get("thread_ts")
+
+        if not text:
+            return {"error": "text is required"}
+
+        if not channel and not user:
+            return {"error": "Either channel or user is required"}
+
+        target = None
+        if channel:
+            if not channel.startswith("#") and not channel.startswith("C"):
+                channel = f"#{channel}"
+            target = channel
+        elif user:
+            try:
+                if "@" in user:
+                    channels_response = await self._async_call_api(
+                        "conversations_list", types="public_channel,private_channel"
+                    )
+                    for c in channels_response.get("channels", []):
+                        if user.lower() in c["name"].lower():
+                            target = c["id"]
+                            break
+
+                    if not target:
+                        users_response = await self._async_call_api("users_lookupByEmail", email=user)
+                        if users_response and "user" in users_response:
+                            user = users_response["user"]["id"]
+
+                if not target and user.startswith("U"):
+                    target = user
+                elif not target:
+                    users_response = await self._async_call_api("users_list")
+                    for u in users_response.get("members", []):
+                        if user.lower() in u.get("real_name", "").lower() or user.lower() in u.get("name", "").lower():
+                            target = u["id"]
+                            break
+
+                if target and target.startswith("U"):
+                    dm_response = await self._async_call_api("conversations_open", users=target)
+                    if dm_response and "channel" in dm_response:
+                        target = dm_response["channel"]["id"]
+
+            except SlackApiError as e:
+                return {"error": f"Failed to resolve user: {e.response['error']}"}
+
+        if not target:
+            return {"error": "Could not resolve channel or user"}
+
+        try:
+            response = await self._async_call_api("chat_postMessage", channel=target, text=text, thread_ts=thread_ts)
+            return {"channel": response.get("channel", ""), "ts": response.get("ts", "")}
+
+        except SlackApiError:
+            raise
+
+    async def _async_lookup_user(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Async version of _lookup_user."""
+        email = params.get("email")
+        name = params.get("name")
+        user_id = params.get("user")
+
+        if not email and not name and not user_id:
+            return {"error": "Either email, name, or user ID is required"}
+
+        try:
+            if email:
+                response = await self._async_call_api("users_lookupByEmail", email=email)
+                if response and "user" in response:
+                    return self._format_user_info(response["user"])
+                return {"error": "User not found"}
+
+            user_list = []
+            if user_id and user_id.startswith("U"):
+                response = await self._async_call_api("users_list")
+                user_list = response.get("members", [])
+            else:
+                response = await self._async_call_api("users_list")
+                user_list = response.get("members", [])
+
+            for user in user_list:
+                if user_id and user["id"] == user_id:
+                    return self._format_user_info(user)
+                if name and (
+                    name.lower() in user.get("real_name", "").lower() or name.lower() in user.get("name", "").lower()
+                ):
+                    return self._format_user_info(user)
+
+            return {"error": "User not found"}
+
+        except SlackApiError:
+            raise
+
+    async def _async_get_user_info(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Async version of _get_user_info."""
+        user_id = params.get("user_id")
+        if not user_id:
+            return {"error": "user_id is required"}
+
+        try:
+            response = await self._async_call_api("users_info", user=user_id)
+
+            if response and "user" in response:
+                user = response["user"]
+                if user:
+                    return self._format_user_info(user)
+            return {"error": "User not found"}
+
+        except SlackApiError:
+            raise
