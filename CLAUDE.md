@@ -120,6 +120,8 @@ The entire application now uses async/await patterns:
 - **AsyncClaude**: Custom Claude client with cancellation support for long-running requests
 - **Async Handlers**: All event handlers use async/await for non-blocking operations
 - **Conversation Manager**: Async conversation state management with proper cleanup
+- **Tool Registry**: Supports both sync and async tool execution without creating new event loops
+- **Slack Tool**: Automatically detects client type (sync/async) and handles operations accordingly
 
 ### Message Flow
 1. User opens a new assistant thread or sends a message
@@ -212,6 +214,8 @@ result = linear.query(custom_query)
   - Tool execution with bash commands (built-in)
   - Multi-round tool execution support (handles tools that use other tools)
   - Automatic error detection and color-coded tool results
+  - Emergency stop button (🛑) to cancel long-running operations
+  - Proper async support for all Slack operations to prevent resource warnings
 - **Preserves**: Slack mentions `<@USER_ID>` and channels `<#CHANNEL_ID>`
 - **Tool Results**: Auto-collapse in Slack when >700 chars or >5 lines
 

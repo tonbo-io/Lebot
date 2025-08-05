@@ -3,6 +3,7 @@
 import os
 import re
 import time
+import json
 import asyncio
 from typing import List, Dict, Any, Optional, Callable
 from pathlib import Path
@@ -47,11 +48,31 @@ When a prompt has Slack's special syntax like <@USER_ID> or <#CHANNEL_ID>, you m
             print(f"Warning: Could not load system.md: {e}")
             base_prompt = cls.DEFAULT_SYSTEM_CONTENT
 
-        # Append current date and time information
+        # Append team member mapping if available from environment
+        team_mapping_json = os.getenv("TEAM_MEMBER_MAPPING")
+        if team_mapping_json:
+            try:
+                team_members = json.loads(team_mapping_json)
+
+                # Build the team member table
+                team_section = "\n\n## Our Folks\n"
+                team_section += "| Linear Name | Linear Email | Slack User ID | Slack Mention | Slack Handle |\n"
+                team_section += "|-------------|--------------|---------------|---------------|--------------|"
+
+                for member in team_members:
+                    team_section += f"\n| {member.get('linear_name', '')} | {member.get('linear_email', '')} | {member.get('slack_user_id', '')} | {member.get('slack_mention', '')} | {member.get('slack_handle', '')} |"
+
+                base_prompt += team_section
+            except (json.JSONDecodeError, TypeError) as e:
+                print(f"Warning: Could not parse TEAM_MEMBER_MAPPING: {e}")
+
+        # Append current date and time information (hour precision for caching)
         import datetime
 
         now = datetime.datetime.now().astimezone()
-        date_info = f"\n\n**Current context**: {now.strftime('%A')}, {str(now)} ({str(now.tzinfo)})"
+        # Round to hour precision for better cache utilization
+        hour_precision = now.replace(minute=0, second=0, microsecond=0)
+        date_info = f"\n\n**Current context**: {hour_precision.strftime('%A, %Y-%m-%d %H:00')} ({str(now.tzinfo)})"
 
         return base_prompt + date_info
 
@@ -159,7 +180,7 @@ When a prompt has Slack's special syntax like <@USER_ID> or <#CHANNEL_ID>, you m
         tool_registry: Any,
         tools: Optional[List[Dict[str, Any]]] = None,
         system_content: Optional[str] = None,
-        thinking_budget: int = 8192,
+        thinking_budget: int = 16384,
         model: str = "claude-sonnet-4-20250514",
         cancel_check: Optional[Callable[[], bool]] = None,
     ) -> None:
@@ -193,13 +214,23 @@ When a prompt has Slack's special syntax like <@USER_ID> or <#CHANNEL_ID>, you m
         if tools:
             tools_list.extend(tools)
 
+        # Prepare system prompt with cache control for the entire prompt
+        # Since we use hour precision, the entire prompt can be cached
+        system_with_cache = [{"type": "text", "text": system_content, "cache_control": {"type": "ephemeral"}}]  # Cache
+
+        # Add cache control to tools if they exist
+        # Tools typically don't change, so caching them saves tokens
+        tools_with_cache = None
+        if tools_list:
+            tools_with_cache = [{**tool, "cache_control": {"type": "ephemeral"}} for tool in tools_list]
+
         # Prepare request parameters
         request_params = {
-            "max_tokens": 4096,
+            "max_tokens": 8192,
             "messages": messages,
             "model": model,
-            "system": system_content,
-            "tools": tools_list,
+            "system": system_with_cache,  # Use the cached system prompt
+            "tools": tools_with_cache if tools_with_cache else tools_list,
             "extra_headers": {"anthropic-beta": "interleaved-thinking-2025-05-14"},
             "thinking": {"type": "enabled", "budget_tokens": thinking_budget},
         }
