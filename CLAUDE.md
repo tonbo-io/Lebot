@@ -117,7 +117,11 @@ When working with Claude Code in VS Code, the following MCP (Model Context Proto
 ### Async Architecture
 The entire application now uses async/await patterns:
 - **AsyncApp**: Slack Bolt's async application for better performance
-- **AsyncClaude**: Custom Claude client with cancellation support for long-running requests
+- **AsyncClaude**: Custom Claude client with streaming API support and cancellation for long-running requests
+  - Uses `client.messages.stream()` for real-time response streaming
+  - Buffers complete text blocks before sending to prevent message fragmentation in Slack
+  - Properly handles thinking block signatures from the server
+  - Maintains correct message ordering (thinking blocks first, then text, then tool uses)
 - **Async Handlers**: All event handlers use async/await for non-blocking operations
 - **Conversation Manager**: Async conversation state management with proper cleanup
 - **Tool Registry**: Supports both sync and async tool execution without creating new event loops
@@ -133,10 +137,10 @@ The entire application now uses async/await patterns:
    - Assistant messages are parsed to recover thinking blocks and tool uses
    - Tool results are properly separated into user messages with `tool_result` blocks
    - Thinking blocks are reordered to appear first (required by Claude's thinking mode)
-5. `LLM.message()` sends conversation to Claude API with system prompt
-6. Claude's response is processed:
-   - Thinking blocks are displayed as quoted text with metadata
-   - Text content is converted from markdown to Slack mrkdwn format
+5. `LLM.async_message()` streams conversation to Claude API with system prompt using streaming API
+6. Claude's streaming response is processed in real-time:
+   - Thinking blocks are accumulated and displayed as quoted text with server-provided signatures
+   - Text content is buffered until complete, then converted from markdown to Slack mrkdwn format
    - Tool uses trigger tool execution with results shown in attachments
 7. If tools were used, the system automatically:
    - Sends tool results back to Claude

@@ -71,14 +71,13 @@ def parse_assistant_message(
                 # Save any accumulated content
                 if in_thinking:
                     # Get signature from ordered list
+                    thinking_content = {
+                        "type": "thinking",
+                        "thinking": "\n".join(current_block),
+                    }
                     if thinking_index < len(thinking_signatures):
-                        content_blocks.append(
-                            {
-                                "type": "thinking",
-                                "thinking": "\n".join(current_block),
-                                "signature": thinking_signatures[thinking_index],
-                            }
-                        )
+                        thinking_content["signature"] = thinking_signatures[thinking_index]
+                    content_blocks.append(thinking_content)
                     thinking_index += 1
                 else:
                     text_content = "\n".join(current_block).strip()
@@ -107,14 +106,13 @@ def parse_assistant_message(
             # Regular text line
             if in_thinking:
                 # End of thinking block
+                thinking_content = {
+                    "type": "thinking",
+                    "thinking": "\n".join(current_block),
+                }
                 if thinking_index < len(thinking_signatures):
-                    content_blocks.append(
-                        {
-                            "type": "thinking",
-                            "thinking": "\n".join(current_block),
-                            "signature": thinking_signatures[thinking_index],
-                        }
-                    )
+                    thinking_content["signature"] = thinking_signatures[thinking_index]
+                content_blocks.append(thinking_content)
                 thinking_index += 1
                 current_block = []
                 in_thinking = False
@@ -123,14 +121,13 @@ def parse_assistant_message(
     # Save any remaining content
     if current_block:
         if in_thinking:
+            thinking_content = {
+                "type": "thinking",
+                "thinking": "\n".join(current_block),
+            }
             if thinking_index < len(thinking_signatures):
-                content_blocks.append(
-                    {
-                        "type": "thinking",
-                        "thinking": "\n".join(current_block),
-                        "signature": thinking_signatures[thinking_index],
-                    }
-                )
+                thinking_content["signature"] = thinking_signatures[thinking_index]
+            content_blocks.append(thinking_content)
         else:
             text_content = "\n".join(current_block).strip()
             if text_content:

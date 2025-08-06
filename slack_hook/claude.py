@@ -9,7 +9,6 @@ from typing import List, Dict, Any, Optional, Callable
 from pathlib import Path
 
 from anthropic import AsyncAnthropic
-from anthropic.types import TextBlock, ToolUseBlock, ThinkingBlock
 from slack_bolt.context.set_status.async_set_status import AsyncSetStatus
 
 
@@ -60,7 +59,11 @@ When a prompt has Slack's special syntax like <@USER_ID> or <#CHANNEL_ID>, you m
                 team_section += "|-------------|--------------|---------------|---------------|--------------|"
 
                 for member in team_members:
-                    team_section += f"\n| {member.get('linear_name', '')} | {member.get('linear_email', '')} | {member.get('slack_user_id', '')} | {member.get('slack_mention', '')} | {member.get('slack_handle', '')} |"
+                    team_section += (
+                        f"\n| {member.get('linear_name', '')} | {member.get('linear_email', '')} | "
+                        f"{member.get('slack_user_id', '')} | {member.get('slack_mention', '')} | "
+                        f"{member.get('slack_handle', '')} |"
+                    )
 
                 base_prompt += team_section
             except (json.JSONDecodeError, TypeError) as e:
@@ -83,94 +86,224 @@ When a prompt has Slack's special syntax like <@USER_ID> or <#CHANNEL_ID>, you m
             raise ValueError("ANTHROPIC_API_KEY environment variable is required")
         self.client = AsyncAnthropic(api_key=api_key)
 
-    async def _process_response_content(
+    async def _process_stream_response(
         self,
-        response: Any,
+        stream: Any,
         say: Any,
         set_status: AsyncSetStatus,
         tool_registry: Any,
         cancel_check: Optional[Callable[[], bool]] = None,
-    ) -> List[Dict[str, Any]]:
-        """Process response content, execute tools, and return tool uses.
+    ) -> tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+        """Process streaming response, execute tools, and return content blocks and tool uses.
 
         Args:
-            response: Claude API response
+            stream: Claude API stream
             say: Slack say function
             set_status: Status setter
             tool_registry: Tool registry for execution
             cancel_check: Optional function to check if cancelled
 
         Returns:
-            List of tool uses with their results
+            Tuple of (content_blocks, tool_uses) where:
+            - content_blocks: List of all content blocks for conversation history
+            - tool_uses: List of tool uses with their results
         """
+        # Buffers for accumulating content
+        thinking_blocks = []  # Buffer thinking blocks until we start outputting
+        text_blocks = []
+        tool_use_blocks = []
         tool_uses = []
 
-        for content in response.content:
+        # State tracking
+        current_thinking = ""
+        current_thinking_signature = None
+        current_text = ""
+        current_tool_use = None
+        current_tool_input = ""
+        thinking_sent = False  # Track if we've sent thinking blocks to Slack
+
+        async for event in stream:
             # Check for cancellation
             if cancel_check and cancel_check():
+                await stream.close()
                 raise asyncio.CancelledError("Processing cancelled")
 
-            if isinstance(content, ThinkingBlock):
-                # Format thinking content as quoted text
-                thinking_text = content.thinking
+            if event.type == "thinking":
+                # Accumulate thinking content
+                current_thinking += event.thinking
+                # Check if signature is provided with the thinking event
+                if hasattr(event, "signature"):
+                    current_thinking_signature = event.signature
+                # Check in the snapshot which contains the accumulated state
+                if hasattr(event, "snapshot") and hasattr(event.snapshot, "signature"):
+                    current_thinking_signature = event.snapshot.signature
+
+            elif event.type == "content_block_start":
+                # Handle the start of a new content block
+                if hasattr(event, "content_block") and hasattr(event.content_block, "type"):
+                    if event.content_block.type == "thinking":
+                        current_thinking = ""
+                        # Extract signature if available at block start
+                        if hasattr(event.content_block, "signature"):
+                            current_thinking_signature = event.content_block.signature
+                        # Reset signature if starting a new thinking block without one
+                        elif not hasattr(event.content_block, "signature"):
+                            current_thinking_signature = None
+                    elif event.content_block.type == "text":
+                        # If we have buffered thinking blocks, send them now
+                        if thinking_blocks and not thinking_sent:
+                            for thinking_block in thinking_blocks:
+                                thinking_text = thinking_block["thinking"]
+                                quoted_lines = [f"> {line}" for line in thinking_text.split("\n")]
+                                quoted_text = "\n".join(quoted_lines)
+
+                                signature = thinking_block.get("signature", "")
+                                await say(
+                                    text=quoted_text,
+                                    attachments=[
+                                        {
+                                            "color": "#e0e0e0",  # Light gray for thinking
+                                            "text": "",  # Empty text, just using for metadata
+                                            "footer": f"thinking:{signature}" if signature else "thinking",
+                                            "ts": int(time.time()),
+                                        }
+                                    ],
+                                )
+                            thinking_sent = True
+                        current_text = ""
+                    elif event.content_block.type == "tool_use":
+                        current_tool_use = {
+                            "id": event.content_block.id,
+                            "name": event.content_block.name,
+                        }
+                        current_tool_input = ""
+
+            elif event.type == "text":
+                # Buffer text content instead of streaming immediately
+                if event.text:
+                    current_text += event.text
+
+            elif event.type == "input_json":
+                # Accumulate tool input JSON
+                if event.partial_json:
+                    current_tool_input += event.partial_json
+
+            elif event.type == "content_block_stop":
+                # Handle completion of a content block
+                if hasattr(event, "content_block"):
+                    block = event.content_block
+                    if hasattr(block, "type"):
+                        if block.type == "thinking":
+                            # Get signature from the completed block
+                            final_signature = current_thinking_signature
+                            if hasattr(block, "signature"):
+                                final_signature = block.signature
+
+                            # Store completed thinking block with signature from server
+                            thinking_block = {"type": "thinking", "thinking": current_thinking}
+                            if final_signature:
+                                thinking_block["signature"] = final_signature
+                            thinking_blocks.append(thinking_block)
+                            current_thinking = ""
+                            current_thinking_signature = None
+
+                        elif block.type == "text":
+                            # Send the complete text block to Slack
+                            if current_text:
+                                formatted_text = self.markdown_to_slack(current_text)
+                                await say(formatted_text)
+                                # Store completed text block
+                                text_blocks.append({"type": "text", "text": current_text})
+                                current_text = ""
+
+                        elif block.type == "tool_use":
+                            # Execute the tool
+                            if current_tool_use:
+                                await set_status(f"using {current_tool_use['name']}...")
+
+                                # Parse the accumulated JSON input
+                                import json
+
+                                try:
+                                    tool_input = json.loads(current_tool_input) if current_tool_input else {}
+                                except json.JSONDecodeError:
+                                    tool_input = {}
+
+                                # Execute tool
+                                if hasattr(tool_registry, "async_execute_tool"):
+                                    tool_result = await tool_registry.async_execute_tool(
+                                        current_tool_use["name"], tool_input
+                                    )
+                                else:
+                                    # Fallback to sync execution in thread pool
+                                    tool_result = await asyncio.get_event_loop().run_in_executor(
+                                        None, tool_registry.execute_tool, current_tool_use["name"], tool_input
+                                    )
+
+                                # Store tool use block for conversation history
+                                tool_use_block = {
+                                    "type": "tool_use",
+                                    "id": current_tool_use["id"],
+                                    "name": current_tool_use["name"],
+                                    "input": tool_input,
+                                }
+                                tool_use_blocks.append(tool_use_block)
+
+                                # Store tool use with result for follow-up
+                                tool_uses.append(
+                                    {
+                                        "tool_use_id": current_tool_use["id"],
+                                        "name": current_tool_use["name"],
+                                        "input": tool_input,
+                                        "result": tool_result,
+                                    }
+                                )
+
+                                # Show tool usage in Slack
+                                formatted_result = self.markdown_to_slack(tool_result)
+                                color = "#ff0000" if "error" in tool_result.lower() else "#2eb886"
+
+                                await say(
+                                    text=f"*Tool: {current_tool_use['name']}*",
+                                    attachments=[
+                                        {
+                                            "color": color,
+                                            "title": f"Tool: {current_tool_use['name']}",
+                                            "text": formatted_result,
+                                            "footer": f"Tool ID: {current_tool_use['id']}",
+                                            "ts": int(time.time()),
+                                        }
+                                    ],
+                                )
+
+                                current_tool_use = None
+                                current_tool_input = ""
+
+        # Send any remaining thinking blocks if they haven't been sent
+        if thinking_blocks and not thinking_sent:
+            for thinking_block in thinking_blocks:
+                thinking_text = thinking_block["thinking"]
                 quoted_lines = [f"> {line}" for line in thinking_text.split("\n")]
                 quoted_text = "\n".join(quoted_lines)
 
-                # Send thinking as plain quoted text
+                signature = thinking_block.get("signature", "")
                 await say(
                     text=quoted_text,
                     attachments=[
                         {
-                            "color": "#e0e0e0",  # Light gray for thinking
-                            "text": "",  # Empty text, just using for metadata
-                            "footer": f"thinking:{content.signature}",
-                            "ts": int(time.time()),
-                        }
-                    ],
-                )
-            elif isinstance(content, TextBlock):
-                # Convert and send each text block immediately
-                formatted_text = self.markdown_to_slack(content.text)
-                await say(formatted_text)
-            elif isinstance(content, ToolUseBlock):
-                # Execute the tool
-                await set_status(f"using {content.name}...")
-
-                # Execute tool (assuming tool registry has async support)
-                if hasattr(tool_registry, "async_execute_tool"):
-                    tool_result = await tool_registry.async_execute_tool(content.name, content.input)
-                else:
-                    # Fallback to sync execution in thread pool
-                    tool_result = await asyncio.get_event_loop().run_in_executor(
-                        None, tool_registry.execute_tool, content.name, content.input
-                    )
-
-                # Store tool use for potential follow-up
-                tool_uses.append(
-                    {"tool_use_id": content.id, "name": content.name, "input": content.input, "result": tool_result}
-                )
-
-                # Show tool usage in Slack using attachments for auto-collapse
-                formatted_result = self.markdown_to_slack(tool_result)
-
-                # Determine color based on tool result (simple heuristic)
-                color = "#ff0000" if "error" in tool_result.lower() else "#2eb886"
-
-                # Use attachment for tool results - auto-collapses if >700 chars or >5 lines
-                await say(
-                    text=f"*Tool: {content.name}*",  # Fallback for notifications
-                    attachments=[
-                        {
-                            "color": color,
-                            "title": f"Tool: {content.name}",
-                            "text": formatted_result,
-                            "footer": f"Tool ID: {content.id}",
+                            "color": "#e0e0e0",
+                            "text": "",
+                            "footer": f"thinking:{signature}" if signature else "thinking",
                             "ts": int(time.time()),
                         }
                     ],
                 )
 
-        return tool_uses
+        # Construct properly ordered content blocks for conversation history
+        # CRITICAL: Thinking blocks MUST come first for assistant messages
+        content_blocks = thinking_blocks + text_blocks + tool_use_blocks
+
+        return content_blocks, tool_uses
 
     async def async_message(
         self,
@@ -239,15 +372,19 @@ When a prompt has Slack's special syntax like <@USER_ID> or <#CHANNEL_ID>, you m
         if cancel_check and cancel_check():
             raise asyncio.CancelledError("Request cancelled before API call")
 
-        # Initial response
-        response = await self.client.messages.create(**request_params)
+        # Initial streaming response
+        content_blocks = []
+        tool_uses = []
 
-        if len(response.content) < 1:
+        async with self.client.messages.stream(**request_params) as stream:
+            # Process streaming response
+            content_blocks, tool_uses = await self._process_stream_response(
+                stream, say, set_status, tool_registry, cancel_check
+            )
+
+        if not content_blocks:
             await say("I'm distracted.")
             return
-
-        # Process initial response
-        tool_uses = await self._process_response_content(response, say, set_status, tool_registry, cancel_check)
 
         # Continue processing while there are tool uses
         tool_round = 0
@@ -260,27 +397,9 @@ When a prompt has Slack's special syntax like <@USER_ID> or <#CHANNEL_ID>, you m
             tool_round += 1
             await set_status(f"processing tool results (round {tool_round})...")
 
-            # Add assistant message with all content to conversation
-            # First, collect all content blocks by type
-            thinking_blocks = []
-            text_blocks = []
-            tool_use_blocks = []
-
-            for content in response.content:
-                if isinstance(content, ThinkingBlock):
-                    thinking_blocks.append(
-                        {"type": "thinking", "thinking": content.thinking, "signature": content.signature}
-                    )
-                elif isinstance(content, TextBlock):
-                    text_blocks.append({"type": "text", "text": content.text})
-                elif isinstance(content, ToolUseBlock):
-                    tool_use_blocks.append(
-                        {"type": "tool_use", "id": content.id, "name": content.name, "input": content.input}
-                    )
-
-            # Construct assistant content with thinking blocks first (required for thinking mode)
-            assistant_content = thinking_blocks + text_blocks + tool_use_blocks
-            messages.append({"role": "assistant", "content": assistant_content})
+            # Add assistant message with all content blocks
+            # Content blocks are already properly ordered (thinking first) from _process_stream_response
+            messages.append({"role": "assistant", "content": content_blocks})
 
             # Add tool results as user message
             tool_result_content = []
@@ -314,10 +433,12 @@ When a prompt has Slack's special syntax like <@USER_ID> or <#CHANNEL_ID>, you m
 
             follow_up_params["messages"] = follow_up_messages
 
-            response = await self.client.messages.create(**follow_up_params)
-
-            # Process follow-up response and check for more tool uses
-            tool_uses = await self._process_response_content(response, say, set_status, tool_registry, cancel_check)
+            # Stream follow-up response
+            async with self.client.messages.stream(**follow_up_params) as stream:
+                # Process follow-up response and check for more tool uses
+                content_blocks, tool_uses = await self._process_stream_response(
+                    stream, say, set_status, tool_registry, cancel_check
+                )
 
     @staticmethod
     def markdown_to_slack(content: str) -> str:
