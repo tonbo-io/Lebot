@@ -1,99 +1,214 @@
-# App Agent & Assistant Template (Bolt for Python)
+# Lebot - AI-Powered Slack Assistant
 
-This Bolt for Python template demonstrates how to build [Agents & Assistants](https://api.slack.com/docs/apps/ai) in Slack.
+A sophisticated Slack Assistant Bot that integrates with Anthropic's Claude API to provide intelligent AI assistance directly in Slack workspaces. Built with Python, Slack Bolt, and async architecture for high performance.
 
-## Setup
-Before getting started, make sure you have a development workspace where you have permissions to install apps. If you don’t have one setup, go ahead and [create one](https://slack.com/create).
+## Features
 
-### Developer Program
-Join the [Slack Developer Program](https://api.slack.com/developer-program) for exclusive access to sandbox environments for building and testing your apps, tooling, and resources created to help you build and grow.
+- **🤖 Slack Assistant Integration**: Native Slack Assistant API for seamless conversational interfaces
+- **🧠 Claude AI Models**: 
+  - **Normal Mode**: Claude Sonnet 4 (optimized for speed)
+  - **Beast Mode**: Claude Opus 4 (maximum intelligence) - selectable via interactive buttons
+- **🔧 Tool Integration**: Extensible architecture with built-in bash commands and Linear API integration
+- **⚡ Real-time Streaming**: Async streaming responses with live status updates
+- **💭 Thinking Mode**: Shows Claude's reasoning process with proper formatting
+- **🛑 Emergency Stop**: Cancel long-running operations with stop button
+- **📊 Linear Integration**: Query and manage Linear issues directly from Slack
 
-## Installation
+## Quick Start
 
-#### Create a Slack App
-1. Open [https://api.slack.com/apps/new](https://api.slack.com/apps/new) and choose "From an app manifest"
-2. Choose the workspace you want to install the application to
-3. Copy the contents of [manifest.json](./manifest.json) into the text box that says `*Paste your manifest code here*` (within the JSON tab) and click *Next*
-4. Review the configuration and click *Create*
-5. Click *Install to Workspace* and *Allow* on the screen that follows. You'll then be redirected to the App Configuration dashboard.
+### Prerequisites
+- Python 3.8+
+- Slack workspace with admin permissions
+- Anthropic API key
+- Linear API key (optional)
 
-#### Environment Variables
-Before you can run the app, you'll need to store some environment variables.
+### Installation
 
-1. Open your app configuration page from this list, click **OAuth & Permissions** in the left hand menu, then copy the Bot User OAuth Token. You will store this in your environment as `SLACK_BOT_TOKEN`.
-2. Click **Basic Information** from the left hand menu and follow the steps in the App-Level Tokens section to create an app-level token with the `connections:write` scope. Copy this token. You will store this in your environment as `SLACK_APP_TOKEN`.
-
-```zsh
-# Replace with your app token and bot token
-# For Windows OS, env:SLACK_BOT_TOKEN = <your-bot-token> works
-export SLACK_BOT_TOKEN=<your-bot-token>
-export SLACK_APP_TOKEN=<your-app-token>
-# This sample uses OpenAI's API by default, but you can switch to any other solution!
-export OPENAI_API_KEY=<your-openai-api-key>
+1. **Clone the repository**
+```bash
+git clone https://github.com/yourusername/lebot.git
+cd lebot
 ```
 
-### Setup Your Local Project
-```zsh
-# Clone this project onto your machine
-git clone https://github.com/slack-samples/bolt-python-assistant-template.git
-
-# Change into this project directory
-cd bolt-python-assistant-template
-
-# Setup your python virtual environment
+2. **Set up Python environment**
+```bash
 python3 -m venv .venv
-source .venv/bin/activate  # for Windows OS, .\.venv\Scripts\Activate instead should work
-
-# Install the dependencies
+source .venv/bin/activate  # Windows: .\.venv\Scripts\Activate
 pip install -r requirements.txt
+```
 
-# Start your local server
+3. **Create Slack App**
+   - Go to [api.slack.com/apps/new](https://api.slack.com/apps/new)
+   - Choose "From an app manifest"
+   - Copy contents of `manifest.json` and paste in the JSON tab
+   - Click Create, then Install to Workspace
+
+4. **Configure environment variables**
+```bash
+cp .env.example .env
+```
+
+Edit `.env` with your credentials:
+```bash
+SLACK_BOT_TOKEN=xoxb-your-bot-token        # From OAuth & Permissions
+SLACK_APP_TOKEN=xapp-your-app-token        # From Basic Information > App-Level Tokens
+ANTHROPIC_API_KEY=sk-ant-api03-your-key    # From Anthropic Console
+LINEAR_OAUTH_KEY=lin_api_your_key          # Optional: From Linear Settings
+```
+
+5. **Run the bot**
+
+Using Slack CLI (recommended):
+```bash
+# Install Slack CLI if you haven't already
+# Visit: https://api.slack.com/automation/cli/install
+
+# Run the app with Slack CLI
+slack run
+```
+
+Or run directly with Python:
+```bash
 python3 app.py
 ```
 
-#### Linting
-```zsh
-# Run flake8 from root directory for linting
-flake8 *.py && flake8 listeners/
+## Usage
 
-# Run black from root directory for code formatting
+1. **Start a conversation**: Click the ✨ Assistant button in any Slack channel or DM to start a new assistant thread
+2. **Select AI model**: Use the interactive buttons in the greeting:
+   - 🚀 **Normal Mode**: Fast responses with Claude Sonnet 4
+   - 🦾 **Beast Mode**: Maximum capability with Claude Opus 4
+3. **Ask questions**: Type naturally in the assistant thread - no @ mentions needed
+4. **Use tools**: The bot can execute bash commands and query Linear issues
+
+### Example Interactions
+
+In an assistant thread, simply type:
+```
+Can you help me understand this Python error?
+Show me all in-progress Linear issues
+What issues were created this week?
+Can you analyze our test coverage?
+```
+
+## Architecture
+
+```
+User ↔ Slack Assistant ↔ LLM (Claude) ↔ Tools
+```
+
+### Key Components
+
+- **`app.py`**: Main entry point with async Slack Bolt app
+- **`slack_hook/`**: Core Slack integration
+  - `assistant.py`: Async event handlers with decorators
+  - `claude.py`: Custom async Claude client with streaming
+  - `conversation_manager.py`: Thread context management
+  - `message_parser.py`: Parsing for thinking blocks and tool uses
+- **`tools/`**: Extensible tool system
+  - `graphql.py`: GraphQL client with Linear API integration
+
+### Async Architecture
+
+The entire application uses async/await for optimal performance:
+- Non-blocking I/O operations
+- Real-time streaming responses
+- Concurrent tool execution
+- Proper resource management
+
+## Development
+
+### Code Quality
+```bash
+# Linting
+flake8 *.py && flake8 slack_hook/ && flake8 tools/
+
+# Formatting (125 char line length)
 black .
+
+# Testing
+pytest
 ```
 
-## Project Structure
+### Linear API Usage
 
-### `manifest.json`
+```python
+from tools.graphql import LinearClient
 
-`manifest.json` is a configuration for Slack apps. With a manifest, you can create an app with a pre-defined configuration, or adjust the configuration of an existing app.
+# Initialize client
+linear = LinearClient(os.getenv('LINEAR_OAUTH_KEY'))
 
-### `app.py`
+# Get issues
+issues = linear.get_issues(limit=50)
+in_progress = linear.get_in_progress_issues()
 
-`app.py` is the entry point for the application and is the file you'll run to start the server. This project aims to keep this file as thin as possible, primarily using it as a way to route inbound requests.
-
-### `/listeners`
-
-Every incoming request is routed to a "listener". Inside this directory, we group each listener based on the Slack Platform feature used, so `/listeners/events` handles incoming events, `/listeners/shortcuts` would handle incoming [Shortcuts](https://api.slack.com/interactivity/shortcuts) requests, and so on.
-
-## App Distribution / OAuth
-
-Only implement OAuth if you plan to distribute your application across multiple workspaces. A separate `app_oauth.py` file can be found with relevant OAuth settings.
-
-When using OAuth, Slack requires a public URL where it can send requests. In this template app, we've used [`ngrok`](https://ngrok.com/download). Checkout [this guide](https://ngrok.com/docs#getting-started-expose) for setting it up.
-
-Start `ngrok` to access the app on an external network and create a redirect URL for OAuth. 
-
-```
-ngrok http 3000
+# Query by date
+from datetime import datetime, timedelta
+weekly_issues = linear.get_issues_by_date_range(
+    start_date=(datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d'),
+    end_date=datetime.now().strftime('%Y-%m-%d')
+)
 ```
 
-This output should include a forwarding address for `http` and `https` (we'll use `https`). It should look something like the following:
+## Configuration
 
-```
-Forwarding   https://3cb89939.ngrok.io -> http://localhost:3000
+### Slack App Manifest
+The `manifest.json` defines:
+- Assistant feature with custom description
+- Required OAuth scopes
+- Event subscriptions
+- Socket Mode configuration
+
+### Environment Variables
+See `.env.example` for all available options:
+- `SLACK_BOT_TOKEN`: Bot user OAuth token
+- `SLACK_APP_TOKEN`: App-level token for Socket Mode
+- `ANTHROPIC_API_KEY`: Claude API key
+- `LINEAR_OAUTH_KEY`: Linear API key (optional)
+
+## Future Enhancements
+
+See [`docs/claude-code-integration-architecture.md`](docs/claude-code-integration-architecture.md) for planned Claude Code integration that would add:
+- File operations and code generation
+- Dynamic script discovery and execution
+- Sandboxed development environment
+- Enhanced tool capabilities
+
+## Troubleshooting
+
+### Common Issues
+
+1. **Bot not responding**: Check Socket Mode connection and app tokens
+2. **Linear integration failing**: Verify API key and permissions
+3. **Streaming issues**: Ensure async handlers are properly awaited
+4. **Type errors**: Run `flake8` to check for type hint issues
+
+### Debug Mode
+Enable debug logging by setting:
+```bash
+export DEBUG=true
 ```
 
-Navigate to **OAuth & Permissions** in your app configuration and click **Add a Redirect URL**. The redirect URL should be set to your `ngrok` forwarding address with the `slack/oauth_redirect` path appended. For example:
+## Contributing
 
-```
-https://3cb89939.ngrok.io/slack/oauth_redirect
-```
+1. Fork the repository
+2. Create a feature branch
+3. Run tests and linting
+4. Submit a pull request
+
+## License
+
+MIT License - see LICENSE file for details
+
+## Support
+
+- [Slack API Documentation](https://api.slack.com)
+- [Anthropic Claude Documentation](https://docs.anthropic.com)
+- [Linear API Documentation](https://linear.app/developers)
+
+## Security
+
+- Store all API keys in `.env` file
+- Never commit credentials to version control
+- Use environment variables for all sensitive data
+- Review `manifest.json` OAuth scopes before deployment
